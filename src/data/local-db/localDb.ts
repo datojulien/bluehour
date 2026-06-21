@@ -48,9 +48,17 @@ import {
   transactionSplitSchema
 } from "./validators";
 
-const DB_NAME = "bluehour-local";
+export type ProfileId = "demo" | "live";
+
+export const LEGACY_DB_NAME = "bluehour-local";
+export const PROFILE_DB_NAMES: Record<ProfileId, string> = {
+  demo: "bluehour-profile-demo",
+  live: "bluehour-profile-live"
+};
+
 const DB_VERSION = 3;
-const DEMO_SEED_VERSION = "v1-local-demo-v4";
+export const INDEXED_DB_SCHEMA_VERSION = DB_VERSION;
+export const DEMO_FIXTURE_VERSION = "v1-local-demo-v4";
 
 interface LocalMeta {
   key: string;
@@ -123,12 +131,11 @@ const DOMAIN_STORES = [
 ] as const satisfies readonly DomainStoreName[];
 
 const SUPPORT_STORES = ["settings", "outboxOperations", "conflicts", "syncState"] as const satisfies readonly SupportStoreName[];
-const ALL_STORES = [...DOMAIN_STORES, "meta"] as const;
 const MUTABLE_STORES = [...DOMAIN_STORES, ...SUPPORT_STORES] as const;
 const SEED_STORES = [...MUTABLE_STORES, "meta"] as const;
 
-export async function openBluehourDb(): Promise<IDBPDatabase<BluehourDB>> {
-  return openDB<BluehourDB>(DB_NAME, DB_VERSION, {
+export async function openBluehourDb(profileId: ProfileId = "demo"): Promise<IDBPDatabase<BluehourDB>> {
+  return openDB<BluehourDB>(PROFILE_DB_NAMES[profileId], DB_VERSION, {
     upgrade(db) {
       for (const store of [...DOMAIN_STORES, "settings", "outboxOperations", "conflicts"] as const) {
         if (!db.objectStoreNames.contains(store)) {
@@ -148,10 +155,30 @@ export async function openBluehourDb(): Promise<IDBPDatabase<BluehourDB>> {
   });
 }
 
+export async function legacyDatabaseExists(): Promise<boolean> {
+  const databaseApi = indexedDB as IDBFactory & {
+    databases?: () => Promise<Array<{ name?: string }>>;
+  };
+
+  if (!databaseApi.databases) {
+    return false;
+  }
+
+  const databases = await databaseApi.databases();
+  return databases.some((database) => database.name === LEGACY_DB_NAME);
+}
+
 export async function seedDemoIfNeeded(): Promise<void> {
-  const db = await openBluehourDb();
+  const db = await openBluehourDb("demo");
   const currentSeed = await db.get("meta", "demoSeedVersion");
-  if (currentSeed?.value === DEMO_SEED_VERSION) {
+  const existingAccounts = await db.count("accounts");
+  const existingTransactions = await db.count("transactions");
+
+  if (existingAccounts > 0 || existingTransactions > 0) {
+    if (currentSeed?.value !== DEMO_FIXTURE_VERSION) {
+      await db.put("meta", { key: "demoSeedVersion", value: DEMO_FIXTURE_VERSION });
+    }
+    db.close();
     return;
   }
 
@@ -159,9 +186,43 @@ export async function seedDemoIfNeeded(): Promise<void> {
   validateSnapshot(snapshot);
 
   const tx = db.transaction(SEED_STORES, "readwrite");
+  await putAll(tx.objectStore("accounts"), snapshot.accounts);
+  await putAll(tx.objectStore("balanceSnapshots"), snapshot.balanceSnapshots);
+  await putAll(tx.objectStore("transactions"), snapshot.transactions);
+  await putAll(tx.objectStore("transactionLegs"), snapshot.transactionLegs);
+  await putAll(tx.objectStore("transactionSplits"), snapshot.transactionSplits);
+  await putAll(tx.objectStore("categories"), snapshot.categories);
+  await putAll(tx.objectStore("budgetCycles"), snapshot.budgetCycles);
+  await putAll(tx.objectStore("budgetAllocations"), snapshot.budgetAllocations);
+  await putAll(tx.objectStore("budgetTransfers"), snapshot.budgetTransfers);
+  await putAll(tx.objectStore("recurringRules"), snapshot.recurringRules);
+  await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
+  await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
+  await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
+  await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
+  await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
+  await putAll(tx.objectStore("reconciliations"), snapshot.reconciliations);
+  await putAll(tx.objectStore("reviewSessions"), snapshot.reviewSessions);
+  await putAll(tx.objectStore("settings"), snapshot.settings);
+  await putAll(tx.objectStore("outboxOperations"), snapshot.outboxOperations);
+  await putAll(tx.objectStore("conflicts"), snapshot.conflicts);
+  await putAll(tx.objectStore("syncState"), snapshot.syncState);
+  await tx.objectStore("meta").put({ key: "demoSeedVersion", value: DEMO_FIXTURE_VERSION });
+  await tx.objectStore("meta").put({ key: "activeProfile", value: "demo" });
+  await tx.done;
+  db.close();
+}
+
+export async function resetDemoProfile(): Promise<void> {
+  const db = await openBluehourDb("demo");
+  const snapshot = createDemoSnapshot();
+  validateSnapshot(snapshot);
+
+  const tx = db.transaction(SEED_STORES, "readwrite");
   for (const store of MUTABLE_STORES) {
     await tx.objectStore(store).clear();
   }
+  await tx.objectStore("meta").clear();
 
   await putAll(tx.objectStore("accounts"), snapshot.accounts);
   await putAll(tx.objectStore("balanceSnapshots"), snapshot.balanceSnapshots);
@@ -184,14 +245,68 @@ export async function seedDemoIfNeeded(): Promise<void> {
   await putAll(tx.objectStore("outboxOperations"), snapshot.outboxOperations);
   await putAll(tx.objectStore("conflicts"), snapshot.conflicts);
   await putAll(tx.objectStore("syncState"), snapshot.syncState);
-  await tx.objectStore("meta").put({ key: "demoSeedVersion", value: DEMO_SEED_VERSION });
+  await tx.objectStore("meta").put({ key: "demoSeedVersion", value: DEMO_FIXTURE_VERSION });
   await tx.objectStore("meta").put({ key: "activeProfile", value: "demo" });
   await tx.done;
+  db.close();
 }
 
-export async function loadDemoSnapshot(): Promise<BluehourSnapshot> {
-  await seedDemoIfNeeded();
-  const db = await openBluehourDb();
+export async function initializeLiveProfile(): Promise<void> {
+  const db = await openBluehourDb("live");
+  const existingSyncState = await db.get("syncState", "google");
+  const existingPreferences = (await db.getAll("settings")).find((setting) => setting.key === "preferences");
+
+  if (existingSyncState && existingPreferences) {
+    db.close();
+    return;
+  }
+
+  const tx = db.transaction(["settings", "syncState", "meta"], "readwrite");
+  if (!existingPreferences) {
+    const now = new Date().toISOString();
+    await tx.objectStore("settings").put({
+      id: "settings-preferences-live",
+      key: "preferences",
+      valueJson: JSON.stringify({
+        currency: "MYR",
+        locale: "en-MY",
+        dateDisplay: "DD/MM/YYYY",
+        amountDisplay: "RM1,234.50",
+        salaryWindowStartDay: 24,
+        salaryWindowEndDay: 26,
+        minimumProtectedRateBasisPoints: 1_000,
+        bufferMinimumMinor: 50_000,
+        bufferEssentialRateBasisPoints: 1_000,
+        weeklyReconciliationDefault: true
+      }),
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+      revision: 1
+    } satisfies AppSettings);
+  }
+
+  if (!existingSyncState) {
+    await tx.objectStore("syncState").put({
+      key: "google",
+      status: "saved_locally",
+      message: "Live profile is saved locally. Google backup is not configured."
+    } satisfies SyncState);
+  }
+
+  await tx.objectStore("meta").put({ key: "activeProfile", value: "live" });
+  await tx.done;
+  db.close();
+}
+
+export async function loadProfileSnapshot(profileId: ProfileId): Promise<BluehourSnapshot> {
+  if (profileId === "demo") {
+    await seedDemoIfNeeded();
+  } else {
+    await initializeLiveProfile();
+  }
+
+  const db = await openBluehourDb(profileId);
   const snapshot: BluehourSnapshot = {
     accounts: await db.getAll("accounts"),
     balanceSnapshots: await db.getAll("balanceSnapshots"),
@@ -217,7 +332,16 @@ export async function loadDemoSnapshot(): Promise<BluehourSnapshot> {
     syncState: await db.getAll("syncState")
   };
   validateSnapshot(snapshot);
+  db.close();
   return snapshot;
+}
+
+export async function loadDemoSnapshot(): Promise<BluehourSnapshot> {
+  return loadProfileSnapshot("demo");
+}
+
+export async function loadLiveSnapshot(): Promise<BluehourSnapshot> {
+  return loadProfileSnapshot("live");
 }
 
 function validateSnapshot(snapshot: BluehourSnapshot): void {
@@ -257,18 +381,19 @@ export interface LocalMutation {
   outbox?: boolean;
 }
 
-export async function putLocalRecords(mutations: readonly LocalMutation[], outboxLabel = "manual"): Promise<void> {
+export async function putLocalRecords(profileId: ProfileId, mutations: readonly LocalMutation[], outboxLabel = "manual"): Promise<void> {
   if (mutations.length === 0) {
     return;
   }
 
-  const db = await openBluehourDb();
+  const db = await openBluehourDb(profileId);
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
   const now = new Date().toISOString();
+  const shouldQueueOutbox = profileId === "live";
 
   for (const mutation of mutations) {
     await tx.objectStore(mutation.storeName).put(mutation.record as never);
-    if (mutation.outbox ?? mutation.storeName !== "outboxOperations") {
+    if (shouldQueueOutbox && (mutation.outbox ?? mutation.storeName !== "outboxOperations")) {
       const record = mutation.record as { id?: string; key?: string };
       const recordId = record.id ?? record.key ?? crypto.randomUUID();
       const operation: OutboxOperation = {
@@ -286,14 +411,18 @@ export async function putLocalRecords(mutations: readonly LocalMutation[], outbo
 
   await tx.objectStore("syncState").put({
     key: "google",
-    status: "waiting_to_sync",
-    message: `${outboxLabel} saved locally and waiting to sync.`
+    status: profileId === "demo" ? "demo" : "waiting_to_sync",
+    message:
+      profileId === "demo"
+        ? `${outboxLabel} saved in the fictional demonstration profile. Google sync is disabled.`
+        : `${outboxLabel} saved locally and waiting to sync.`
   });
   await tx.done;
+  db.close();
 }
 
-export async function archiveLocalRecord(storeName: DomainStoreName, recordId: string): Promise<void> {
-  const db = await openBluehourDb();
+export async function archiveLocalRecord(profileId: ProfileId, storeName: DomainStoreName, recordId: string): Promise<void> {
+  const db = await openBluehourDb(profileId);
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
   const store = tx.objectStore(storeName);
   const current = (await store.get(recordId)) as ({ id: string; archivedAt?: string | null; updatedAt?: string; revision?: number } | undefined);
@@ -309,35 +438,41 @@ export async function archiveLocalRecord(storeName: DomainStoreName, recordId: s
     revision: (current.revision ?? 0) + 1
   };
   await store.put(archived as never);
-  await tx.objectStore("outboxOperations").put({
-    id: `outbox-${crypto.randomUUID()}`,
-    tableName: storeName,
-    recordId,
-    operation: "archive",
-    payloadJson: JSON.stringify(archived),
-    createdAt: now,
-    attempts: 0
-  } satisfies OutboxOperation);
+  if (profileId === "live") {
+    await tx.objectStore("outboxOperations").put({
+      id: `outbox-${crypto.randomUUID()}`,
+      tableName: storeName,
+      recordId,
+      operation: "archive",
+      payloadJson: JSON.stringify(archived),
+      createdAt: now,
+      attempts: 0
+    } satisfies OutboxOperation);
+  }
   await tx.objectStore("syncState").put({
     key: "google",
-    status: "waiting_to_sync",
-    message: "Archive saved locally and waiting to sync."
+    status: profileId === "demo" ? "demo" : "waiting_to_sync",
+    message: profileId === "demo" ? "Demo archive saved locally. Google sync is disabled." : "Archive saved locally and waiting to sync."
   });
   await tx.done;
+  db.close();
 }
 
-export async function applyRemoteSyncResult({
-  mutations,
-  conflicts,
-  syncState,
-  clearOutbox
-}: {
+export async function applyRemoteSyncResult(
+  profileId: ProfileId,
+  {
+    mutations,
+    conflicts,
+    syncState,
+    clearOutbox
+  }: {
   mutations: readonly LocalMutation[];
   conflicts: readonly ConflictRecord[];
   syncState: SyncState;
   clearOutbox: boolean;
-}): Promise<void> {
-  const db = await openBluehourDb();
+  }
+): Promise<void> {
+  const db = await openBluehourDb(profileId);
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
 
   for (const mutation of mutations) {
@@ -354,12 +489,14 @@ export async function applyRemoteSyncResult({
 
   await tx.objectStore("syncState").put(syncState);
   await tx.done;
+  db.close();
 }
 
-export async function clearOutboxAndMarkSynced(syncState: SyncState): Promise<void> {
-  const db = await openBluehourDb();
+export async function clearOutboxAndMarkSynced(profileId: ProfileId, syncState: SyncState): Promise<void> {
+  const db = await openBluehourDb(profileId);
   const tx = db.transaction(["outboxOperations", "syncState"], "readwrite");
   await tx.objectStore("outboxOperations").clear();
   await tx.objectStore("syncState").put(syncState);
   await tx.done;
+  db.close();
 }

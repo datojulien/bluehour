@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Check, Save } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateAccountBalances } from "../../domain/accounts/calculations";
 import { formatDisplayDate } from "../../domain/dates";
 import { closeSalaryCycleWithActualSalary } from "../../domain/forecasting/cycleCommands";
@@ -17,7 +17,7 @@ interface ChecklistItem {
 }
 
 export function ReviewPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   const balances = useMemo(

@@ -105,7 +105,7 @@ export function calculateSafeToSpend(input: SafeToSpendInput): SafeToSpendResult
   const countedFutureIncomeMinor = includedIncome.reduce((total, income) => total + income.amountMinor, 0);
   const committedPlans = calculateCommittedPlans(input, categoryById);
   const committedReserveMinor = committedPlans.reduce((total, plan) => total + plan.amountMinor, 0);
-  const essentialEnvelopeReserves = calculateEssentialEnvelopeReserves(input, activeCategories, categoryById);
+  const essentialEnvelopeReserves = calculateEssentialEnvelopeReserves(input, activeCategories);
   const essentialEnvelopeReserveMinor = essentialEnvelopeReserves.reduce((total, reserve) => total + reserve.amountMinor, 0);
   const completedProtectedMinor = calculateCompletedProtectedTransfers(input);
   const protectedTargetMinor =
@@ -235,8 +235,7 @@ function calculateCommittedPlans(input: SafeToSpendInput, categoryById: Map<stri
 
 function calculateEssentialEnvelopeReserves(
   input: SafeToSpendInput,
-  activeCategories: readonly Category[],
-  categoryById: Map<string, Category>
+  activeCategories: readonly Category[]
 ): ReserveLine[] {
   return activeCategories
     .filter((category) => category.nature === "essential" && category.reservationMode === "envelope")

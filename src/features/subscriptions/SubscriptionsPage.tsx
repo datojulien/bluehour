@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta } from "../../domain/records";
@@ -9,7 +9,7 @@ import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
 export function SubscriptionsPage() {
-  const { snapshot, asOfDate, loading, error, saveRecords } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecords } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   const subscriptions = useMemo(
@@ -51,6 +51,7 @@ export function SubscriptionsPage() {
       <SubscriptionForm
         accounts={accounts}
         categories={categories}
+        defaultDate={asOfDate}
         onSave={async ({ subscription, rule, plan }) => {
           await saveRecords(
             [
@@ -109,15 +110,17 @@ export function SubscriptionsPage() {
 function SubscriptionForm({
   accounts,
   categories,
+  defaultDate,
   onSave
 }: {
   accounts: Array<{ id: string; name: string }>;
   categories: Array<{ id: string; name: string }>;
+  defaultDate: string;
   onSave: (records: { subscription: Subscription; rule: RecurringRule; plan: PlanInstance }) => Promise<void>;
 }) {
   const [provider, setProvider] = useState("");
   const [amount, setAmount] = useState("");
-  const [nextPaymentDate, setNextPaymentDate] = useState("2026-07-23");
+  const [nextPaymentDate, setNextPaymentDate] = useState(defaultDate);
   const [annualRenewalDate, setAnnualRenewalDate] = useState("");
   const [billingFrequency, setBillingFrequency] = useState<Subscription["billingFrequency"]>("monthly");
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");

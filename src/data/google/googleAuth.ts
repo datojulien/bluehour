@@ -1,4 +1,4 @@
-const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
+const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let inMemoryAccessToken: string | null = null;
 

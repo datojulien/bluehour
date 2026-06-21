@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { Download, KeyRound, Plus, ShieldCheck, Upload } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { decryptBackup, encryptBackup, type EncryptedBackupEnvelope } from "../../data/backup/encryptedBackup";
 import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
 import { createBluehourSpreadsheet, createConnectionDescriptor, extractSpreadsheetId } from "../../data/google/googleSheetsAdapter";
 import { pushSnapshotToGoogleSheet, readSnapshotFromGoogleSheet } from "../../data/google/sheetSerialization";
 import type { LocalMutation, MutableStoreName } from "../../data/local-db/localDb";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
-import { planGoogleSheetSync, SYNCED_STORES, type SyncedStoreName } from "../../data/sync/googleSync";
+import { planGoogleSheetSync } from "../../data/sync/googleSync";
 import { toCsv } from "../../domain/imports/csv";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
@@ -17,7 +17,8 @@ import { isActive } from "../../domain/types";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 export function SettingsPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, applyRemoteSync, markSynced } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, applyRemoteSync, markSynced, isDemo, canUseGoogleSync } =
+    useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   if (loading) {
@@ -60,6 +61,7 @@ export function SettingsPage() {
         />
         <GoogleSettings
           snapshot={snapshot}
+          canUseGoogleSync={canUseGoogleSync}
           onSave={async (setting) => {
             await saveRecord("settings", setting, "Google connection");
             setMessage("Google connection descriptor saved locally. No token was stored.");
@@ -71,6 +73,7 @@ export function SettingsPage() {
       </section>
 
       <StartCycleSetupPanel
+        date={asOfDate}
         accounts={snapshot.accounts.filter(isActive)}
         incomeCategoryId={snapshot.categories.find((category) => category.name === "Income")?.id ?? "cat-income"}
         onSave={async (records) => {
@@ -123,12 +126,13 @@ export function SettingsPage() {
       <section className="two-column">
         <BackupPanel
           snapshot={snapshot}
+          isDemo={isDemo}
           onRestore={async (restored) => {
             await saveRecords(snapshotToMutations(restored), "backup restore");
             setMessage("Encrypted backup restored into local IndexedDB.");
           }}
         />
-        <CsvExportPanel snapshot={snapshot} />
+        <CsvExportPanel snapshot={snapshot} isDemo={isDemo} />
       </section>
 
       <section className="dashboard-band">
@@ -165,15 +169,17 @@ export function SettingsPage() {
 }
 
 function StartCycleSetupPanel({
+  date,
   accounts,
   incomeCategoryId,
   onSave
 }: {
+  date: string;
   accounts: Account[];
   incomeCategoryId: string;
   onSave: (records: ReturnType<typeof startFirstSalaryCycle>) => Promise<void>;
 }) {
-  const [salaryDate, setSalaryDate] = useState("2026-07-24");
+  const [salaryDate, setSalaryDate] = useState(date);
   const [salaryDeposit, setSalaryDeposit] = useState("");
   const [currentBalance, setCurrentBalance] = useState("");
   const [destinationAccountId, setDestinationAccountId] = useState(accounts[0]?.id ?? "");
@@ -348,12 +354,14 @@ function AccountForm({ date, onSave }: { date: string; onSave: (records: { accou
 
 function GoogleSettings({
   snapshot,
+  canUseGoogleSync,
   onSave,
   onApplyRemoteSync,
   onMarkSynced,
   onPushed
 }: {
   snapshot: BluehourSnapshot;
+  canUseGoogleSync: boolean;
   onSave: (setting: AppSettings) => Promise<void>;
   onApplyRemoteSync: (args: {
     mutations: LocalMutation[];
@@ -371,6 +379,9 @@ function GoogleSettings({
   const [busy, setBusy] = useState(false);
 
   async function saveSpreadsheetId(spreadsheetId: string) {
+    if (!canUseGoogleSync) {
+      throw new Error("Demonstration data cannot be connected to Google Sheets");
+    }
     const descriptor = createConnectionDescriptor(extractSpreadsheetId(spreadsheetId));
     const setting: AppSettings = existing
       ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
@@ -386,6 +397,9 @@ function GoogleSettings({
     setBusy(true);
     setStatus(null);
     try {
+      if (!canUseGoogleSync) {
+        throw new Error("Demonstration data cannot create or sync a Google Sheet");
+      }
       if (!GOOGLE_CLIENT_ID) {
         throw new Error("Set VITE_GOOGLE_CLIENT_ID before creating a Google Sheet");
       }
@@ -406,6 +420,9 @@ function GoogleSettings({
     setBusy(true);
     setStatus(null);
     try {
+      if (!canUseGoogleSync) {
+        throw new Error("Demonstration data cannot be pushed to Google Sheets");
+      }
       if (!GOOGLE_CLIENT_ID) {
         throw new Error("Set VITE_GOOGLE_CLIENT_ID before pushing to Google Sheets");
       }
@@ -437,6 +454,9 @@ function GoogleSettings({
     setBusy(true);
     setStatus(null);
     try {
+      if (!canUseGoogleSync) {
+        throw new Error("Demonstration data cannot be synced with Google Sheets");
+      }
       if (!GOOGLE_CLIENT_ID) {
         throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Sheets");
       }
@@ -490,27 +510,28 @@ function GoogleSettings({
         </div>
       </div>
       <div className="stack-list">
+        {!canUseGoogleSync ? <p className="form-note danger-text">Google sync is disabled for the fictional demonstration profile.</p> : null}
         <p>Tokens are requested only after a user action and are kept in memory only.</p>
         <label>
           Existing Sheet URL or ID
           <input value={spreadsheetInput} onChange={(event) => setSpreadsheetInput(event.target.value)} />
         </label>
         <div className="form-actions">
-          <button className="secondary-action" type="button" onClick={() => void saveSpreadsheetId(spreadsheetInput)}>
+          <button className="secondary-action" type="button" onClick={() => void saveSpreadsheetId(spreadsheetInput)} disabled={!canUseGoogleSync}>
             <KeyRound size={16} aria-hidden="true" />
             Save descriptor
           </button>
-          <button className="secondary-action" type="button" onClick={downloadDescriptor} disabled={!spreadsheetInput}>
+          <button className="secondary-action" type="button" onClick={downloadDescriptor} disabled={!spreadsheetInput || !canUseGoogleSync}>
             <Download size={16} aria-hidden="true" />
             Download descriptor
           </button>
-          <button className="primary-action" type="button" onClick={() => void createSheet()} disabled={busy}>
+          <button className="primary-action" type="button" onClick={() => void createSheet()} disabled={busy || !canUseGoogleSync}>
             Create Sheet
           </button>
-          <button className="primary-action" type="button" onClick={() => void pushToSheet()} disabled={busy || !spreadsheetInput}>
+          <button className="primary-action" type="button" onClick={() => void pushToSheet()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
             Push local snapshot
           </button>
-          <button className="primary-action" type="button" onClick={() => void syncNow()} disabled={busy || !spreadsheetInput}>
+          <button className="primary-action" type="button" onClick={() => void syncNow()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
             Sync now
           </button>
         </div>
@@ -569,7 +590,15 @@ function ConflictReviewPanel({
   );
 }
 
-function BackupPanel({ snapshot, onRestore }: { snapshot: BluehourSnapshot; onRestore: (snapshot: BluehourSnapshot) => Promise<void> }) {
+function BackupPanel({
+  snapshot,
+  isDemo,
+  onRestore
+}: {
+  snapshot: BluehourSnapshot;
+  isDemo: boolean;
+  onRestore: (snapshot: BluehourSnapshot) => Promise<void>;
+}) {
   const [passphrase, setPassphrase] = useState("");
   const [restoreText, setRestoreText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -577,7 +606,7 @@ function BackupPanel({ snapshot, onRestore }: { snapshot: BluehourSnapshot; onRe
   async function exportBackup() {
     try {
       const envelope = await encryptBackup(snapshot, passphrase);
-      downloadJson("bluehour-encrypted-backup.json", envelope);
+      downloadJson(isDemo ? "bluehour-fictional-demo-encrypted-backup.json" : "bluehour-live-encrypted-backup.json", envelope);
       setMessage("Encrypted backup created. The passphrase was not stored.");
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : "Backup failed");
@@ -627,7 +656,9 @@ function BackupPanel({ snapshot, onRestore }: { snapshot: BluehourSnapshot; onRe
   );
 }
 
-function CsvExportPanel({ snapshot }: { snapshot: BluehourSnapshot }) {
+function CsvExportPanel({ snapshot, isDemo }: { snapshot: BluehourSnapshot; isDemo: boolean }) {
+  const prefix = isDemo ? "bluehour-fictional-demo" : "bluehour-live";
+
   return (
     <section className="dashboard-band">
       <div className="band-header">
@@ -637,19 +668,19 @@ function CsvExportPanel({ snapshot }: { snapshot: BluehourSnapshot }) {
         </div>
       </div>
       <div className="stack-list">
-        <button className="secondary-action" type="button" onClick={() => downloadText("bluehour-accounts.csv", toCsv(["id", "name", "type", "role"], snapshot.accounts))}>
+        <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-accounts.csv`, toCsv(["id", "name", "type", "role"], snapshot.accounts))}>
           Accounts CSV
         </button>
-        <button className="secondary-action" type="button" onClick={() => downloadText("bluehour-transactions.csv", toCsv(["id", "occurredOn", "description", "type"], snapshot.transactions))}>
+        <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-transactions.csv`, toCsv(["id", "occurredOn", "description", "type"], snapshot.transactions))}>
           Transactions CSV
         </button>
-        <button className="secondary-action" type="button" onClick={() => downloadText("bluehour-budgets.csv", toCsv(["id", "budgetCycleId", "categoryId", "baseAmountMinor"], snapshot.budgetAllocations))}>
+        <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-budgets.csv`, toCsv(["id", "budgetCycleId", "categoryId", "baseAmountMinor"], snapshot.budgetAllocations))}>
           Budgets CSV
         </button>
-        <button className="secondary-action" type="button" onClick={() => downloadText("bluehour-plans.csv", toCsv(["id", "name", "expectedDate", "expectedAmountMinor", "status"], snapshot.planInstances))}>
+        <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-plans.csv`, toCsv(["id", "name", "expectedDate", "expectedAmountMinor", "status"], snapshot.planInstances))}>
           Plans CSV
         </button>
-        <button className="secondary-action" type="button" onClick={() => downloadText("bluehour-subscriptions.csv", toCsv(["id", "provider", "billingFrequency", "nextPaymentDate"], snapshot.subscriptions))}>
+        <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-subscriptions.csv`, toCsv(["id", "provider", "billingFrequency", "nextPaymentDate"], snapshot.subscriptions))}>
           Subscriptions CSV
         </button>
       </div>

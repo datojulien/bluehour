@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Archive, FileDown, Plus, RotateCcw, Upload } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { findRuleProposals } from "../../domain/categorisation/rules";
 import { formatDisplayDate } from "../../domain/dates";
 import { hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
@@ -17,7 +17,7 @@ import type { LocalMutation } from "../../data/local-db/localDb";
 const transactionTypes = ["expense", "income", "transfer", "refund", "reimbursement"] as const;
 
 export function TransactionsPage() {
-  const { snapshot, asOfDate, loading, error, saveTransaction, saveRecords, archiveRecord } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveTransaction, saveRecords, archiveRecord } = useBluehourData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -226,7 +226,7 @@ export function TransactionsPage() {
         />
       ) : null}
 
-      <CsvImportPanel accounts={activeAccounts} onImport={handleImport} />
+      <CsvImportPanel accounts={activeAccounts} defaultDate={asOfDate} onImport={handleImport} />
 
       <section className="dashboard-band">
         <div className="filter-bar">
@@ -651,8 +651,16 @@ function TransactionComposer({
   );
 }
 
-function CsvImportPanel({ accounts, onImport }: { accounts: Array<{ id: string; name: string }>; onImport: (text: string, accountId: string) => Promise<void> }) {
-  const [text, setText] = useState("date,description,amount,reference\n2026-07-12,Example Grocer,-12.30,DEMO-001");
+function CsvImportPanel({
+  accounts,
+  defaultDate,
+  onImport
+}: {
+  accounts: Array<{ id: string; name: string }>;
+  defaultDate: string;
+  onImport: (text: string, accountId: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(`date,description,amount,reference\n${defaultDate},Example Grocer,-12.30,SAMPLE-001`);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);

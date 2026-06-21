@@ -1,7 +1,6 @@
-export const BLUEHOUR_SCHEMA_VERSION = 1;
+export const BLUEHOUR_SCHEMA_VERSION = 2;
 
-export const GOOGLE_SHEET_TABS = [
-  "Meta",
+export const GOOGLE_DOMAIN_TABS = [
   "Accounts",
   "BalanceSnapshots",
   "Transactions",
@@ -20,6 +19,14 @@ export const GOOGLE_SHEET_TABS = [
   "Reconciliations",
   "ReviewSessions",
   "Settings"
+] as const;
+
+export const GOOGLE_SHEET_SLOTS = ["A", "B"] as const;
+export type GoogleSheetSlot = (typeof GOOGLE_SHEET_SLOTS)[number];
+
+export const GOOGLE_SHEET_TABS = [
+  "Meta",
+  ...GOOGLE_SHEET_SLOTS.flatMap((slot) => GOOGLE_DOMAIN_TABS.map((tab) => `${slot}_${tab}`))
 ] as const;
 
 export interface ConnectionDescriptor {

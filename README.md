@@ -1,77 +1,145 @@
 # Bluehour
 
-Bluehour is a React + TypeScript implementation of the v1 personal cash-flow and salary-cycle budgeting specification.
+Bluehour is a React + TypeScript personal cash-flow and salary-cycle budgeting app for MYR. It is designed for a Mac-first Safari web-app experience and answers:
 
-It runs local-first, seeds fictional MYR demonstration data into IndexedDB, keeps money as integer sen, and exposes the safe-to-spend calculation with an auditable breakdown.
+- How much can I safely spend?
+- Will I have enough for upcoming expenses?
+- Am I staying within my budgets?
 
-## What Is Included
+The app is not production-ready `1.0.0` yet. See `PRODUCTION_READINESS.md` for the exact completed and remaining items.
 
-- Vite, React, TypeScript, strict type checking, and hash routing.
-- A Mac-first responsive shell with desktop sidebar and narrow-screen bottom navigation.
-- Safari web app metadata, manifest, icon, and service worker for app-shell caching.
-- Local IndexedDB storage with typed repository access and runtime validation.
-- Fictional MYR demo data and local-first mutation outbox.
-- Safe-to-spend calculation engine with explainable reserves and forecast output.
-- Manual transaction entry, splits, transfers, refunds, planned-payment fulfilment, archive, and CSV import with duplicate outcomes.
-- Transaction search/filter, import batch rollback, categorisation rule review, and rule proposals.
-- First salary-cycle start, salary-cycle close, budget-template carry-forward, budget allocations, explicit budget transfers, recurring plans, subscriptions, net worth snapshots, review checklists, and reconciliation adjustments.
-- CSV exports and encrypted JSON backup/restore.
-- Google Sheet connection descriptor support plus a Google Identity Services token flow that keeps access tokens in memory only.
-- Bidirectional Google Sheet sync planning with remote revision checks, local outbox pushes, remote pulls, merge application, and explicit conflict review.
-- Vitest coverage for money, balances, salary cycles, safe-to-spend, transfers, splits, refunds, budgets, recurrence, duplicate matching, CSV safety, encrypted backup, Google adapter calls, Sheet serialization, sync planning, transaction commands, and IndexedDB demo seeding.
-- GitHub Actions checks and GitHub Pages deployment workflow.
+## Demo And Live Profiles
 
-The app is still public static web code. Do not commit real financial exports or screenshots. Google access tokens are never written to IndexedDB, localStorage, the repository, or the Sheet.
+First launch shows two choices:
 
-## Setup
+- **Explore demonstration** opens isolated fictional MYR data with a fixed demo date.
+- **Set up my finances** creates or resumes an empty live profile using the browser-local date.
+
+Storage is isolated:
+
+- Shell state: `bluehour-shell`
+- Demo profile: `bluehour-profile-demo`
+- Live profile: `bluehour-profile-live`
+- Legacy prototype DB: `bluehour-local`, detected but left untouched
+
+Demo data cannot create, push, pull, or sync a Google Sheet. Demo exports and backups are labelled fictional.
+
+## Local Setup
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Vite will print a local URL, usually `http://localhost:5173/`.
+Vite prints a local URL, usually `http://localhost:5173/`.
 
-## Usage
-
-Open the app and use the sidebar routes. The first launch creates a fictional demo profile in IndexedDB. Amounts are displayed in MYR as `RM1,234.50`, and dates use `DD/MM/YYYY`.
-
-The safe-to-spend amount can be opened for a breakdown of account balances, committed plans, essential envelope reserves, protected contribution status, safety buffer, discretionary cap, and included or excluded income.
-
-Use **Transactions** for quick entry, splits, transfers, refunds, search/filter, archiving, CSV import, import rollback, and categorisation rules. Use **Plan**, **Budgets**, **Subscriptions**, **Net Worth**, and **Review** for the corresponding v1 workflows. Use **Settings** for account setup, first salary-cycle setup, Google descriptor recovery, encrypted backup/restore, and CSV exports.
-
-Privacy mode is available from the toolbar or with `⌘⇧P`. `⌘N` opens transaction entry, `⌘K` opens the command menu, and `/` focuses transaction search. Privacy mode visually obscures amounts only; it is not encryption.
-
-## Google Sheets
-
-To create a private Bluehour Sheet from the browser, provide a Google OAuth client ID at build time:
+Optional Google OAuth config for local testing:
 
 ```bash
-VITE_GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com" npm run dev
+cp .env.example .env
 ```
 
-The Settings page can then request a user-initiated token, create `Bluehour Finance Data`, save only the spreadsheet ID/schema descriptor locally, push the local snapshot to the Sheet using `RAW` values, or run **Sync now**.
+Then set:
 
-Without a client ID, you can paste an existing Bluehour Sheet URL or ID in Settings and download a connection descriptor. The local app remains usable offline either way.
-
-Sync reads the Sheet remote revision, applies non-conflicting remote changes locally, pushes local outbox changes when safe, and creates conflict records when the same financial record changed locally and remotely. Conflicts appear in Settings and require choosing the local or remote version. Token expiry requires a new user action because access tokens are never persisted.
-
-## Safari Web App
-
-For a deployed GitHub Pages build:
-
-1. Open the Bluehour site in Safari.
-2. Choose **File → Add to Dock**.
-3. Launch Bluehour from the Dock.
-
-The app uses a web manifest and service worker so the installed app can relaunch the cached shell after a successful first visit.
+```text
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+```
 
 ## Checks
 
 ```bash
+npm run lint
 npm test
+npm run test:coverage
 npm run typecheck
+npm run build
+npm run test:e2e
+```
+
+Playwright browsers can be installed with:
+
+```bash
+npx playwright install chromium
+```
+
+## Production Build
+
+```bash
 npm run build
 ```
 
-The production build uses `/bluehour/` as the Vite base path for GitHub Pages.
+The production Vite base is `/bluehour/` for GitHub Pages.
+
+## GitHub Pages Deployment
+
+The CI workflow runs lint, unit tests, coverage, typecheck, production build, and Playwright tests before deploying Pages.
+
+Configure this GitHub repository variable:
+
+```text
+VITE_GOOGLE_CLIENT_ID
+```
+
+It is a public browser OAuth client ID, not a secret.
+
+## Google Cloud OAuth Setup
+
+Create an OAuth client for a web application in Google Cloud and add the deployed GitHub Pages origin, for example:
+
+```text
+https://datojulien.github.io
+```
+
+If using project pages, the app path is:
+
+```text
+https://datojulien.github.io/bluehour/
+```
+
+Bluehour requests only:
+
+```text
+https://www.googleapis.com/auth/drive.file
+```
+
+Access tokens are memory-only and are cleared after user-initiated actions.
+
+## Google Sheet Storage
+
+Live mode can create an app-managed private Sheet named `Bluehour Finance Data`.
+
+Current Sheet schema version: `2`.
+
+New pushes use an active/inactive slot protocol:
+
+- `Meta`
+- `A_...` data tabs
+- `B_...` data tabs
+
+Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read for migration, but the non-destructive migration UI remains incomplete.
+
+## Offline Behaviour
+
+The app remains usable locally. Live mutations are saved to IndexedDB and queued in the outbox until Google sync is available. Demo mutations are local-only and never enter the Google outbox.
+
+The service worker uses network-first navigation and versioned static-asset caching so an old cached `index.html` does not permanently pin obsolete bundles.
+
+## Backup And Restore
+
+Settings can create encrypted JSON backups with Web Crypto. The passphrase is never stored. Restore support exists, but full staged atomic restore with profile-type warnings remains a production-readiness item.
+
+## Privacy Model
+
+- No analytics or telemetry.
+- No account numbers, card numbers, banking credentials, passwords, or Google secrets are requested.
+- Google tokens are never persisted.
+- Privacy mode visually obscures amounts only; it is not encryption.
+- Real financial data must never be committed to this repository.
+
+## Limitations
+
+Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The largest are the full CSV mapping wizard, complete plan-confirmation variance UI, cross-salary virtual-cycle forecasting, complete recovery flows, and real Google OAuth/Sheet verification.
+
+## Recovery
+
+See `docs/RECOVERY.md` for legacy database, read-only recovery, Google slot recovery, and backup restore notes.

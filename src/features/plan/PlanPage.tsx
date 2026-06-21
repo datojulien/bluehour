@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { CheckCircle2, Plus } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { addDays, formatDisplayDate } from "../../domain/dates";
 import { generateRecurringPlanInstances } from "../../domain/forecasting/recurrence";
 import { parseMoneyInput } from "../../domain/money";
@@ -10,7 +10,7 @@ import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
 export function PlanPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, saveTransaction } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, saveTransaction } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   const plans = useMemo(
@@ -51,6 +51,7 @@ export function PlanPage() {
       <section className="two-column">
         <PlanForm
           categories={categories}
+          defaultDate={asOfDate}
           onSave={async (plan) => {
             await saveRecord("planInstances", plan, "plan");
             setMessage("Plan saved locally.");
@@ -131,10 +132,18 @@ export function PlanPage() {
   );
 }
 
-function PlanForm({ categories, onSave }: { categories: Array<{ id: string; name: string }>; onSave: (plan: PlanInstance) => Promise<void> }) {
+function PlanForm({
+  categories,
+  defaultDate,
+  onSave
+}: {
+  categories: Array<{ id: string; name: string }>;
+  defaultDate: string;
+  onSave: (plan: PlanInstance) => Promise<void>;
+}) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<PlanInstance["kind"]>("expense");
-  const [expectedDate, setExpectedDate] = useState("2026-07-24");
+  const [expectedDate, setExpectedDate] = useState(defaultDate);
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
   const [confidence, setConfidence] = useState<PlanInstance["confidence"]>("expected");

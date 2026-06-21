@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, CalendarClock, ChevronRight, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
 import type { SafeToSpendPeriod, SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
 import { isActive, type BluehourSnapshot, type IsoDate } from "../../domain/types";
@@ -13,21 +13,21 @@ import { buildDashboardModel } from "./dashboardModel";
 const periodOrder: SafeToSpendPeriod[] = ["untilSalary", "thisMonth", "next30Days"];
 
 export function OverviewPage() {
-  const { snapshot, asOfDate, loading, error } = useDemoData();
+  const { snapshot, asOfDate, loading, error } = useBluehourData();
   const [period, setPeriod] = useState<SafeToSpendPeriod>("untilSalary");
   const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   const model = useMemo(() => (snapshot ? buildDashboardModel(snapshot, asOfDate) : null), [snapshot, asOfDate]);
 
   if (loading) {
-    return <div className="loading-state">Opening local demo data…</div>;
+    return <div className="loading-state">Opening local profile data...</div>;
   }
 
   if (error || !model || !snapshot) {
     return (
       <section className="empty-state">
         <h1>Bluehour</h1>
-        <p>{error ?? "Demo data is unavailable."}</p>
+        <p>{error ?? "No open salary cycle is available yet."}</p>
       </section>
     );
   }
@@ -51,7 +51,7 @@ export function OverviewPage() {
             {formatDisplayDate(cycle.startedOn)} to {formatDisplayDate(addDays(cycle.expectedNextSalaryTo, -1))}
           </h1>
         </div>
-        <div className="date-chip">Demo date {formatDisplayDate(asOfDate)}</div>
+        <div className="date-chip">Today {formatDisplayDate(asOfDate)}</div>
       </div>
 
       <section className="hero-panel">
@@ -100,6 +100,13 @@ export function OverviewPage() {
           <AlertTriangle size={18} aria-hidden="true" />
           <span>
             Forecast shortfall of <Amount value={result.shortfallMinor} /> before this period ends.
+          </span>
+        </section>
+      ) : result.protectedReserveMinor > 0 ? (
+        <section className="alert-band">
+          <ShieldCheck size={18} aria-hidden="true" />
+          <span>
+            Protected contribution remaining: <Amount value={result.protectedReserveMinor} />.
           </span>
         </section>
       ) : (
@@ -261,7 +268,7 @@ function buildDashboardAlerts(
     alerts.push({ label: "Local changes waiting to sync", detail: `${waitingToSync} outbox operation${waitingToSync === 1 ? "" : "s"} pending.`, level: "info" });
   }
 
-  return alerts.length > 0 ? alerts : [{ label: "No urgent alerts", detail: "Demo data is currently calm.", level: "info" }];
+  return alerts.length > 0 ? alerts : [{ label: "No urgent alerts", detail: "The current profile has no urgent forecast warnings.", level: "info" }];
 }
 
 function buildWhatChanged(
@@ -286,7 +293,7 @@ function buildWhatChanged(
     notes.push("Future discretionary plans are already reserved in safe-to-spend.");
   }
 
-  return notes.length > 0 ? notes : ["No major movement compared with the current demo baseline."];
+  return notes.length > 0 ? notes : ["Cycle comparison will be available after another completed cycle."];
 }
 
 function MetricCard({

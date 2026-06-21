@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { ArrowRightLeft, Save } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateCategoryAllocation } from "../../domain/budgets/calculations";
 import { formatDisplayDate } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
@@ -11,7 +11,7 @@ import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
 export function BudgetsPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecord } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   const activeCycle = snapshot?.budgetCycles.find((cycle) => cycle.status === "open");

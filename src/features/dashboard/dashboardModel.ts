@@ -16,7 +16,7 @@ export interface DashboardModel {
 export function buildDashboardModel(snapshot: BluehourSnapshot, asOfDate: IsoDate): DashboardModel {
   const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
   if (!activeCycle) {
-    throw new Error("Demo data does not include an open salary cycle");
+    throw new Error("No open salary cycle is available");
   }
 
   const horizons: Record<SafeToSpendPeriod, { label: string; horizonEndDate: IsoDate }> = {

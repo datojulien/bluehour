@@ -8,8 +8,21 @@ import { SubscriptionsPage } from "../features/subscriptions/SubscriptionsPage";
 import { NetWorthPage } from "../features/net-worth/NetWorthPage";
 import { ReviewPage } from "../features/reviews/ReviewPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
+import { useBluehourData } from "./providers/BluehourDataProvider";
+import { WelcomePage } from "../features/onboarding/WelcomePage";
+import { OnboardingPage } from "../features/onboarding/OnboardingPage";
 
 export function App() {
+  const { applicationState } = useBluehourData();
+
+  if (applicationState === "welcome") {
+    return <WelcomePage />;
+  }
+
+  if (applicationState === "setup" || applicationState === "ready_for_salary") {
+    return <OnboardingPage />;
+  }
+
   return (
     <Routes>
       <Route element={<AppShell />}>

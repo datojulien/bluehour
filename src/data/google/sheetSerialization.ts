@@ -1,41 +1,59 @@
 import type { BluehourSnapshot } from "../../domain/types";
-import { BLUEHOUR_SCHEMA_VERSION, clearSheetValues, GOOGLE_SHEET_TABS, readSheetRanges, writeRawSheetValues } from "./googleSheetsAdapter";
+import {
+  BLUEHOUR_SCHEMA_VERSION,
+  GOOGLE_DOMAIN_TABS,
+  GOOGLE_SHEET_SLOTS,
+  clearSheetValues,
+  readSheetRanges,
+  writeRawSheetValues,
+  type GoogleSheetSlot
+} from "./googleSheetsAdapter";
 
 export type SheetPayload = Record<string, unknown[][]>;
 
 export interface RemoteSheetSnapshot {
   snapshot: Partial<BluehourSnapshot>;
   remoteRevision: number;
+  schemaVersion?: number;
+  activeSlot?: GoogleSheetSlot;
   exportedAt?: string;
 }
 
+const STORE_BY_TAB = {
+  Accounts: "accounts",
+  BalanceSnapshots: "balanceSnapshots",
+  Transactions: "transactions",
+  TransactionLegs: "transactionLegs",
+  TransactionSplits: "transactionSplits",
+  Categories: "categories",
+  BudgetCycles: "budgetCycles",
+  BudgetAllocations: "budgetAllocations",
+  BudgetTransfers: "budgetTransfers",
+  RecurringRules: "recurringRules",
+  PlanInstances: "planInstances",
+  Subscriptions: "subscriptions",
+  CategorisationRules: "categorisationRules",
+  ImportProfiles: "importProfiles",
+  ImportBatches: "importBatches",
+  Reconciliations: "reconciliations",
+  ReviewSessions: "reviewSessions",
+  Settings: "settings"
+} as const satisfies Record<(typeof GOOGLE_DOMAIN_TABS)[number], keyof BluehourSnapshot>;
+
 export function serializeSnapshotToSheets(snapshot: BluehourSnapshot, remoteRevision = currentRemoteRevision(snapshot) + 1): SheetPayload {
   return {
-    Meta: [
-      ["key", "value"],
-      ["schemaVersion", BLUEHOUR_SCHEMA_VERSION],
-      ["remoteRevision", remoteRevision],
-      ["exportedAt", new Date().toISOString()]
-    ],
-    Accounts: rowsFor(snapshot.accounts),
-    BalanceSnapshots: rowsFor(snapshot.balanceSnapshots),
-    Transactions: rowsFor(snapshot.transactions),
-    TransactionLegs: rowsFor(snapshot.transactionLegs),
-    TransactionSplits: rowsFor(snapshot.transactionSplits),
-    Categories: rowsFor(snapshot.categories),
-    BudgetCycles: rowsFor(snapshot.budgetCycles),
-    BudgetAllocations: rowsFor(snapshot.budgetAllocations),
-    BudgetTransfers: rowsFor(snapshot.budgetTransfers),
-    RecurringRules: rowsFor(snapshot.recurringRules),
-    PlanInstances: rowsFor(snapshot.planInstances),
-    Subscriptions: rowsFor(snapshot.subscriptions),
-    CategorisationRules: rowsFor(snapshot.categorisationRules),
-    ImportProfiles: rowsFor(snapshot.importProfiles),
-    ImportBatches: rowsFor(snapshot.importBatches),
-    Reconciliations: rowsFor(snapshot.reconciliations),
-    ReviewSessions: rowsFor(snapshot.reviewSessions),
-    Settings: rowsFor(snapshot.settings)
+    Meta: metaRows({ remoteRevision, schemaVersion: BLUEHOUR_SCHEMA_VERSION }),
+    ...domainRows(snapshot)
   };
+}
+
+export function serializeSnapshotToSlot(
+  snapshot: BluehourSnapshot,
+  slot: GoogleSheetSlot
+): SheetPayload {
+  return Object.fromEntries(
+    Object.entries(domainRows(snapshot)).map(([tabName, values]) => [`${slot}_${tabName}`, values])
+  );
 }
 
 export async function pushSnapshotToGoogleSheet(
@@ -45,11 +63,33 @@ export async function pushSnapshotToGoogleSheet(
   fetcher: typeof fetch = fetch,
   remoteRevision = currentRemoteRevision(snapshot) + 1
 ): Promise<void> {
-  const payload = serializeSnapshotToSheets(snapshot, remoteRevision);
+  const currentMetaPayload = await readSheetRanges(spreadsheetId, ["Meta!A1:ZZZ"], accessToken, fetcher);
+  const currentMeta = keyValueRows(currentMetaPayload.Meta ?? []);
+  const activeSlot = parseSlot(currentMeta.activeSlot) ?? "A";
+  const inactiveSlot = activeSlot === "A" ? "B" : "A";
+  const payload = serializeSnapshotToSlot(snapshot, inactiveSlot);
+
   for (const [tabName, values] of Object.entries(payload)) {
     await clearSheetValues(spreadsheetId, `${tabName}!A1:ZZZ`, accessToken, fetcher);
     await writeRawSheetValues(spreadsheetId, `${tabName}!A1`, values, accessToken, fetcher);
   }
+
+  const inactiveRanges = GOOGLE_DOMAIN_TABS.map((tab) => `${inactiveSlot}_${tab}!A1:ZZZ`);
+  const readBack = await readSheetRanges(spreadsheetId, inactiveRanges, accessToken, fetcher);
+  assertReadBackMatchesSnapshot(snapshot, inactiveSlot, readBack);
+
+  await writeRawSheetValues(
+    spreadsheetId,
+    "Meta!A1",
+    metaRows({
+      activeSlot: inactiveSlot,
+      remoteRevision,
+      schemaVersion: BLUEHOUR_SCHEMA_VERSION,
+      committedAt: new Date().toISOString()
+    }),
+    accessToken,
+    fetcher
+  );
 }
 
 export async function readSnapshotFromGoogleSheet(
@@ -57,41 +97,72 @@ export async function readSnapshotFromGoogleSheet(
   accessToken: string,
   fetcher: typeof fetch = fetch
 ): Promise<RemoteSheetSnapshot> {
-  const ranges = GOOGLE_SHEET_TABS.map((tab) => `${tab}!A1:ZZZ`);
-  const payload = await readSheetRanges(spreadsheetId, ranges, accessToken, fetcher);
-  return deserializeSnapshotFromSheets(payload);
+  const metaPayload = await readSheetRanges(spreadsheetId, ["Meta!A1:ZZZ"], accessToken, fetcher);
+  const meta = keyValueRows(metaPayload.Meta ?? []);
+  const activeSlot = parseSlot(meta.activeSlot);
+
+  if (!activeSlot) {
+    const legacyRanges = ["Meta", ...GOOGLE_DOMAIN_TABS].map((tab) => `${tab}!A1:ZZZ`);
+    const legacyPayload = await readSheetRanges(spreadsheetId, legacyRanges, accessToken, fetcher);
+    return deserializeSnapshotFromSheets(legacyPayload);
+  }
+
+  const ranges = GOOGLE_DOMAIN_TABS.map((tab) => `${activeSlot}_${tab}!A1:ZZZ`);
+  const slotPayload = await readSheetRanges(spreadsheetId, ranges, accessToken, fetcher);
+  const normalisedPayload = normaliseSlotPayload(slotPayload, activeSlot);
+  return deserializeSnapshotFromSheets({
+    Meta: metaPayload.Meta ?? [],
+    ...normalisedPayload
+  });
 }
 
 export function deserializeSnapshotFromSheets(payload: SheetPayload): RemoteSheetSnapshot {
   const meta = keyValueRows(payload.Meta ?? []);
+  const activeSlot = parseSlot(meta.activeSlot);
   return {
     remoteRevision: numberFromUnknown(meta.remoteRevision) ?? 0,
-    exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : undefined,
-    snapshot: {
-      accounts: rowsToRecords(payload.Accounts),
-      balanceSnapshots: rowsToRecords(payload.BalanceSnapshots),
-      transactions: rowsToRecords(payload.Transactions),
-      transactionLegs: rowsToRecords(payload.TransactionLegs),
-      transactionSplits: rowsToRecords(payload.TransactionSplits),
-      categories: rowsToRecords(payload.Categories),
-      budgetCycles: rowsToRecords(payload.BudgetCycles),
-      budgetAllocations: rowsToRecords(payload.BudgetAllocations),
-      budgetTransfers: rowsToRecords(payload.BudgetTransfers),
-      recurringRules: rowsToRecords(payload.RecurringRules),
-      planInstances: rowsToRecords(payload.PlanInstances),
-      subscriptions: rowsToRecords(payload.Subscriptions),
-      categorisationRules: rowsToRecords(payload.CategorisationRules),
-      importProfiles: rowsToRecords(payload.ImportProfiles),
-      importBatches: rowsToRecords(payload.ImportBatches),
-      reconciliations: rowsToRecords(payload.Reconciliations),
-      reviewSessions: rowsToRecords(payload.ReviewSessions),
-      settings: rowsToRecords(payload.Settings)
-    } as Partial<BluehourSnapshot>
+    schemaVersion: numberFromUnknown(meta.schemaVersion) ?? 1,
+    activeSlot,
+    exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : typeof meta.committedAt === "string" ? meta.committedAt : undefined,
+    snapshot: Object.fromEntries(
+      GOOGLE_DOMAIN_TABS.map((tab) => [STORE_BY_TAB[tab], rowsToRecords(payload[tab])])
+    ) as Partial<BluehourSnapshot>
   };
 }
 
 export function currentRemoteRevision(snapshot: BluehourSnapshot): number {
   return snapshot.syncState.find((state) => state.key === "google")?.remoteRevision ?? 0;
+}
+
+function domainRows(snapshot: BluehourSnapshot): SheetPayload {
+  return Object.fromEntries(
+    GOOGLE_DOMAIN_TABS.map((tab) => [tab, rowsFor(snapshot[STORE_BY_TAB[tab]] as readonly object[])])
+  );
+}
+
+function metaRows({
+  activeSlot,
+  remoteRevision,
+  schemaVersion,
+  committedAt
+}: {
+  activeSlot?: GoogleSheetSlot;
+  remoteRevision: number;
+  schemaVersion: number;
+  committedAt?: string;
+}): unknown[][] {
+  const rows: unknown[][] = [
+    ["key", "value"],
+    ["schemaVersion", schemaVersion],
+    ["remoteRevision", remoteRevision],
+    ["exportedAt", committedAt ?? new Date().toISOString()]
+  ];
+
+  if (activeSlot) {
+    rows.push(["activeSlot", activeSlot], ["committedAt", committedAt]);
+  }
+
+  return rows;
 }
 
 function rowsFor(records: readonly object[]): unknown[][] {
@@ -198,4 +269,26 @@ function inferValue(value: unknown): unknown {
 
 function numberFromUnknown(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function parseSlot(value: unknown): GoogleSheetSlot | undefined {
+  return GOOGLE_SHEET_SLOTS.includes(value as GoogleSheetSlot) ? (value as GoogleSheetSlot) : undefined;
+}
+
+function normaliseSlotPayload(payload: SheetPayload, slot: GoogleSheetSlot): SheetPayload {
+  return Object.fromEntries(
+    GOOGLE_DOMAIN_TABS.map((tab) => [tab, payload[`${slot}_${tab}`] ?? []])
+  );
+}
+
+function assertReadBackMatchesSnapshot(snapshot: BluehourSnapshot, slot: GoogleSheetSlot, readBack: SheetPayload): void {
+  const normalised = normaliseSlotPayload(readBack, slot);
+  for (const tab of GOOGLE_DOMAIN_TABS) {
+    const storeName = STORE_BY_TAB[tab];
+    const expectedCount = snapshot[storeName].length;
+    const actualCount = Math.max(0, (normalised[tab]?.length ?? 1) - 1);
+    if (actualCount !== expectedCount) {
+      throw new Error(`Google staged write verification failed for ${tab}`);
+    }
+  }
 }

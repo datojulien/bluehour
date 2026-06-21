@@ -1,7 +1,7 @@
 {
   "name": "Bluehour",
   "short_name": "Bluehour",
-  "description": "A calm MYR cash-flow and salary-cycle budgeting demo.",
+  "description": "A calm MYR cash-flow and salary-cycle budgeting app.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Save } from "lucide-react";
-import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateAccountBalances, calculateNetWorth } from "../../domain/accounts/calculations";
 import { formatDisplayDate } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
@@ -10,7 +10,7 @@ import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
 export function NetWorthPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord } = useDemoData();
+  const { snapshot, asOfDate, loading, error, saveRecord } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   const balances = useMemo(

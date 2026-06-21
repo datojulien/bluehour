@@ -1,10 +1,10 @@
 import {
   BarChart3,
   CalendarDays,
+  ChevronUp,
   Eye,
   EyeOff,
   FileText,
-  Home,
   Landmark,
   LayoutDashboard,
   ListChecks,
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useDemoData } from "../providers/DemoDataProvider";
+import { useBluehourData } from "../providers/BluehourDataProvider";
 import { usePrivacy } from "../providers/PrivacyProvider";
 
 const navigation = [
@@ -34,9 +34,11 @@ const mobileNavigation = navigation.slice(0, 5);
 
 export function AppShell() {
   const { privacyMode, togglePrivacyMode } = usePrivacy();
-  const { snapshot } = useDemoData();
+  const { snapshot, profileLabel, isDemo, resetDemo, returnToWelcome, canUseGoogleSync } = useBluehourData();
   const navigate = useNavigate();
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const syncState = snapshot?.syncState.find((state) => state.key === "google");
   const syncLabel = syncState?.message ?? syncState?.status?.replaceAll("_", " ") ?? "Saved locally";
 
@@ -63,6 +65,15 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
+  useEffect(() => {
+    function handleUpdateAvailable() {
+      setUpdateAvailable(true);
+    }
+
+    window.addEventListener("bluehour:update-available", handleUpdateAvailable);
+    return () => window.removeEventListener("bluehour:update-available", handleUpdateAvailable);
+  }, []);
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -72,8 +83,18 @@ export function AppShell() {
           </div>
           <div>
             <div className="brand-name">Bluehour</div>
-            <div className="brand-state">Demo · local</div>
+            <div className="brand-state">{profileLabel}</div>
           </div>
+        </div>
+        <div className="profile-actions">
+          {isDemo ? (
+            <button type="button" onClick={() => void resetDemo()}>
+              Reset demo
+            </button>
+          ) : null}
+          <button type="button" onClick={() => void returnToWelcome()}>
+            Welcome
+          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -99,7 +120,13 @@ export function AppShell() {
           </div>
 
           <div className="topbar-actions">
-            <button className="icon-button" type="button" aria-label="Open sync settings" title="Sync" onClick={() => navigate("/settings")}>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Open sync settings"
+              title={canUseGoogleSync ? "Sync" : "Demo cannot sync to Google"}
+              onClick={() => navigate("/settings")}
+            >
               <RefreshCcw size={18} aria-hidden="true" />
             </button>
             <button
@@ -118,6 +145,15 @@ export function AppShell() {
           </div>
         </header>
 
+        {updateAvailable ? (
+          <section className="update-banner">
+            <span>A new Bluehour version is available.</span>
+            <button type="button" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </section>
+        ) : null}
+
         <main className="main-surface">
           <Outlet />
         </main>
@@ -125,16 +161,39 @@ export function AppShell() {
 
       <nav className="bottom-nav" aria-label="Primary navigation">
         {mobileNavigation.map((item) => (
-          <NavLink key={item.to} to={item.to} className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}>
+          <NavLink key={item.to} to={item.to} aria-label={item.label} className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}>
             <item.icon size={20} aria-hidden="true" />
             <span>{item.label}</span>
           </NavLink>
         ))}
-        <NavLink to="/settings" className={({ isActive }) => `bottom-nav-item${isActive ? " active" : ""}`}>
-          <Home size={20} aria-hidden="true" />
+        <button
+          className={`bottom-nav-item more-button${mobileMoreOpen ? " active" : ""}`}
+          type="button"
+          aria-label="More"
+          onClick={() => setMobileMoreOpen((open) => !open)}
+        >
+          <ChevronUp size={20} aria-hidden="true" />
           <span>More</span>
-        </NavLink>
+        </button>
       </nav>
+
+      {mobileMoreOpen ? (
+        <div className="mobile-more-menu">
+          {navigation.slice(5).map((item) => (
+            <button
+              type="button"
+              key={item.to}
+              onClick={() => {
+                navigate(item.to);
+                setMobileMoreOpen(false);
+              }}
+            >
+              <item.icon size={18} aria-hidden="true" />
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {commandMenuOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommandMenuOpen(false)}>
