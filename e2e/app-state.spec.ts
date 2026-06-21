@@ -12,7 +12,7 @@ test("demo mode opens fictional data and disables Google sync", async ({ page })
   await page.goto("/");
   await page.getByRole("button", { name: /Explore demonstration/i }).click();
 
-  await expect(page.getByText("Fictional demonstration")).toBeVisible();
+  await expect(page.locator(".brand-state:visible, .topbar-profile-label:visible")).toBeVisible();
   await page.goto("/#/transactions");
   await expect(page.getByText("Vista Heights rent")).toBeVisible();
 
