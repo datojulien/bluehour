@@ -1,0 +1,721 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Archive, FileDown, Plus, RotateCcw, Upload } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { useDemoData } from "../../app/providers/DemoDataProvider";
+import { findRuleProposals } from "../../domain/categorisation/rules";
+import { formatDisplayDate } from "../../domain/dates";
+import { hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
+import { scoreDuplicateMatch } from "../../domain/imports/duplicateMatching";
+import { parseMoneyInput } from "../../domain/money";
+import { createRecordMeta, touchRecord } from "../../domain/records";
+import { createTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
+import type { CategorisationRule, ImportBatch, RecordMeta, Transaction } from "../../domain/types";
+import { isActive } from "../../domain/types";
+import { Amount } from "../../ui/Amount";
+import type { LocalMutation } from "../../data/local-db/localDb";
+
+const transactionTypes = ["expense", "income", "transfer", "refund", "reimbursement"] as const;
+
+export function TransactionsPage() {
+  const { snapshot, asOfDate, loading, error, saveTransaction, saveRecords, archiveRecord } = useDemoData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [message, setMessage] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | Transaction["type"]>("all");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const openComposer = searchParams.get("new") === "1";
+
+  const allTransactions = useMemo(
+    () =>
+      [...(snapshot?.transactions ?? [])]
+        .filter(isActive)
+        .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.createdAt.localeCompare(a.createdAt)),
+    [snapshot]
+  );
+  const transactions = useMemo(
+    () =>
+      allTransactions.filter((transaction) => {
+        const matchesType = typeFilter === "all" || transaction.type === typeFilter;
+        const matchesQuery = query.trim().length === 0 || transaction.description.toLowerCase().includes(query.trim().toLowerCase());
+        return matchesType && matchesQuery;
+      }),
+    [allTransactions, query, typeFilter]
+  );
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "/" && event.target instanceof HTMLElement && !["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  if (loading) {
+    return <div className="loading-state">Opening transactions…</div>;
+  }
+
+  if (error || !snapshot) {
+    return (
+      <section className="empty-state">
+        <h1>Transactions</h1>
+        <p>{error ?? "Transaction data is unavailable."}</p>
+      </section>
+    );
+  }
+
+  const loadedSnapshot = snapshot;
+  const accountsById = new Map(snapshot.accounts.map((account) => [account.id, account]));
+  const categoriesById = new Map(snapshot.categories.map((category) => [category.id, category]));
+  const activeAccounts = snapshot.accounts.filter(isActive);
+  const activeCategories = snapshot.categories.filter((category) => isActive(category) && category.active);
+
+  async function handleImport(text: string, accountId: string) {
+    if (!snapshot) {
+      return;
+    }
+
+    const parsed = parseCsv(text);
+    const profile = snapshot.importProfiles[0];
+    const batch: ImportBatch = {
+      ...createRecordMeta("batch"),
+      importProfileId: profile?.id ?? "ad-hoc",
+      fileName: "browser-import.csv",
+      fileHash: await hashText(text),
+      importedAt: new Date().toISOString(),
+      rowCount: parsed.rows.length,
+      newCount: 0,
+      matchedCount: 0,
+      reviewCount: 0
+    };
+
+    const mutations: LocalMutation[] = [{ storeName: "importBatches", record: batch }];
+
+    for (const row of parsed.rows) {
+      const date = parseCsvDate(row.date ?? row.Date ?? "", "YYYY-MM-DD");
+      const signedAmount = parseMoneyInput(row.amount ?? row.Amount ?? row.signedAmount ?? "0");
+      const description = row.description ?? row.Description ?? "Imported transaction";
+      const reference = row.reference ?? row.Reference ?? "";
+      const amountMinor = Math.abs(signedAmount);
+      const type = signedAmount >= 0 ? "income" : "expense";
+      const duplicate = allTransactions
+        .map((transaction) =>
+          scoreDuplicateMatch(
+            {
+              sourceReference: reference,
+              accountId,
+              amountMinor: signedAmount,
+              occurredOn: date,
+              description,
+              importFingerprint: reference || undefined
+            },
+            {
+              sourceReference: transaction.importFingerprint,
+              accountId,
+              amountMinor: signedAmountForTransaction(transaction),
+              occurredOn: transaction.occurredOn,
+              description: transaction.description,
+              importFingerprint: transaction.importFingerprint
+            }
+          )
+        )
+        .sort((a, b) => b.score - a.score)[0];
+
+      if (duplicate?.outcome === "strong") {
+        batch.matchedCount += 1;
+        continue;
+      }
+
+      if (duplicate?.outcome === "uncertain") {
+        batch.reviewCount += 1;
+        continue;
+      }
+
+      const result = createTransactionRecords(
+        {
+          type,
+          occurredOn: date,
+          description,
+          amountMinor,
+          accountId,
+          categoryId: type === "income" ? "cat-income" : "cat-uncategorised",
+          source: "csv_import",
+          importBatchId: batch.id,
+          importFingerprint: reference || `${date}-${description}-${signedAmount}`
+        },
+        snapshot
+      );
+      batch.newCount += 1;
+      mutations.push({ storeName: "transactions", record: result.transaction });
+      result.legs.forEach((record) => mutations.push({ storeName: "transactionLegs", record }));
+      result.splits.forEach((record) => mutations.push({ storeName: "transactionSplits", record }));
+      if (result.updatedRule) {
+        mutations.push({ storeName: "categorisationRules", record: result.updatedRule });
+      }
+    }
+
+    mutations[0] = { storeName: "importBatches", record: batch };
+    await saveRecords(mutations, "CSV import");
+    setMessage(`Imported ${batch.newCount} new rows. ${batch.matchedCount} strong duplicates skipped. ${batch.reviewCount} uncertain matches need review.`);
+  }
+
+  function signedAmountForTransaction(transaction: Transaction): number {
+    const splitTotal = snapshot?.transactionSplits
+      .filter((split) => split.transactionId === transaction.id && isActive(split))
+      .reduce((total, split) => {
+        if (split.direction === "income" || split.direction === "reversal") {
+          return total + split.amountMinor;
+        }
+
+        return total - split.amountMinor;
+      }, 0);
+
+    return splitTotal ?? 0;
+  }
+
+  async function rollbackImportBatch(batch: ImportBatch) {
+    const importedTransactions = loadedSnapshot.transactions.filter((transaction) => transaction.importBatchId === batch.id && isActive(transaction));
+    const transactionIds = new Set(importedTransactions.map((transaction) => transaction.id));
+    const mutations: LocalMutation[] = [
+      { storeName: "importBatches", record: archiveRecordValue(batch) }
+    ];
+
+    importedTransactions.forEach((transaction) => mutations.push({ storeName: "transactions", record: archiveRecordValue(transaction) }));
+    loadedSnapshot.transactionLegs
+      .filter((leg) => transactionIds.has(leg.transactionId) && isActive(leg))
+      .forEach((leg) => mutations.push({ storeName: "transactionLegs", record: archiveRecordValue(leg) }));
+    loadedSnapshot.transactionSplits
+      .filter((split) => transactionIds.has(split.transactionId) && isActive(split))
+      .forEach((split) => mutations.push({ storeName: "transactionSplits", record: archiveRecordValue(split) }));
+
+    await saveRecords(mutations, "import rollback");
+    setMessage(`Archived ${importedTransactions.length} imported transaction${importedTransactions.length === 1 ? "" : "s"} from ${batch.fileName}.`);
+  }
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <p className="eyebrow">Ledger</p>
+          <h1>Transactions</h1>
+        </div>
+        <button className="primary-action" type="button" onClick={() => setSearchParams({ new: "1" })}>
+          <Plus size={18} aria-hidden="true" />
+          <span>Transaction</span>
+        </button>
+      </div>
+
+      {message ? <section className="alert-band">{message}</section> : null}
+
+      {openComposer ? (
+        <TransactionComposer
+          accounts={activeAccounts}
+          categories={activeCategories}
+          transactions={transactions}
+          defaultDate={asOfDate}
+          onCancel={() => setSearchParams({})}
+          onSave={async (draft) => {
+            await saveTransaction(draft);
+            setSearchParams({});
+            setMessage("Transaction saved locally.");
+          }}
+        />
+      ) : null}
+
+      <CsvImportPanel accounts={activeAccounts} onImport={handleImport} />
+
+      <section className="dashboard-band">
+        <div className="filter-bar">
+          <label>
+            Search
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Description or merchant" />
+          </label>
+          <label>
+            Type
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as "all" | Transaction["type"])}>
+              <option value="all">All types</option>
+              {["expense", "income", "transfer", "refund", "reimbursement", "reconciliation_adjustment", "opening_adjustment"].map((type) => (
+                <option key={type} value={type}>
+                  {type.replaceAll("_", " ")}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <RuleReviewPanel
+        rules={snapshot.categorisationRules.filter(isActive)}
+        transactions={transactions}
+        categories={activeCategories}
+        onSaveRule={async (rule) => {
+          await saveRecords([{ storeName: "categorisationRules", record: rule }], "categorisation rule");
+          setMessage("Categorisation rule saved for future transactions.");
+        }}
+      />
+
+      <ImportBatchPanel batches={snapshot.importBatches.filter(isActive)} onRollback={rollbackImportBatch} />
+
+      <section className="dashboard-band">
+        <div className="band-header">
+          <div>
+            <p className="eyebrow">Recent activity</p>
+            <h2>Ledger records</h2>
+          </div>
+        </div>
+        <div className="data-table" role="table" aria-label="Transactions">
+          <div className="data-row header" role="row">
+            <span>Date</span>
+            <span>Description</span>
+            <span>Account</span>
+            <span>Category</span>
+            <span>Amount</span>
+            <span>Action</span>
+          </div>
+          {transactions.map((transaction) => {
+            const legs = snapshot.transactionLegs.filter((leg) => leg.transactionId === transaction.id && isActive(leg));
+            const splits = snapshot.transactionSplits.filter((split) => split.transactionId === transaction.id && isActive(split));
+            const primaryLeg = legs[0];
+            const amount = Math.abs(signedAmountForTransaction(transaction) || primaryLeg?.deltaMinor || 0);
+            return (
+              <div className="data-row" role="row" key={transaction.id}>
+                <span>{formatDisplayDate(transaction.occurredOn)}</span>
+                <span>
+                  <strong>{transaction.description}</strong>
+                  <small>{transaction.type.replaceAll("_", " ")}</small>
+                </span>
+                <span>{primaryLeg ? accountsById.get(primaryLeg.accountId)?.name : "Multiple"}</span>
+                <span>{splits.map((split) => categoriesById.get(split.categoryId)?.name ?? split.categoryId).join(", ") || "Transfer"}</span>
+                <Amount value={amount} />
+                <button className="icon-button" type="button" aria-label={`Archive ${transaction.description}`} onClick={() => void archiveRecord("transactions", transaction.id)}>
+                  <Archive size={16} aria-hidden="true" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function archiveRecordValue<T extends RecordMeta>(record: T): T {
+  const now = new Date().toISOString();
+  return {
+    ...record,
+    archivedAt: now,
+    updatedAt: now,
+    revision: record.revision + 1
+  };
+}
+
+function RuleReviewPanel({
+  rules,
+  transactions,
+  categories,
+  onSaveRule
+}: {
+  rules: CategorisationRule[];
+  transactions: Transaction[];
+  categories: Array<{ id: string; name: string }>;
+  onSaveRule: (rule: CategorisationRule) => Promise<void>;
+}) {
+  const [proposalCategoryId, setProposalCategoryId] = useState(categories[0]?.id ?? "");
+  const proposals = findRuleProposals(transactions).filter((proposal) =>
+    !rules.some((rule) => rule.active && rule.operator === "contains" && rule.pattern.toLowerCase() === proposal.merchant.toLowerCase())
+  );
+  const nextPriority = Math.max(0, ...rules.map((rule) => rule.priority)) + 10;
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Rules</p>
+          <h2>Categorisation review</h2>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-row header">
+          <span>Name</span>
+          <span>Match</span>
+          <span>Category</span>
+          <span>Hits</span>
+          <span>Status</span>
+          <span>Action</span>
+        </div>
+        {rules.map((rule) => (
+          <div className="data-row" key={rule.id}>
+            <span>
+              <strong>{rule.name}</strong>
+              <small>priority {rule.priority}</small>
+            </span>
+            <span>
+              {rule.operator} · {rule.pattern}
+            </span>
+            <span>{categories.find((category) => category.id === rule.categoryId)?.name ?? rule.categoryId}</span>
+            <span>{rule.hitCount}</span>
+            <span>{rule.active ? "active" : "disabled"}</span>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => void onSaveRule({ ...touchRecord(rule), active: !rule.active })}
+            >
+              {rule.active ? "Disable" : "Enable"}
+            </button>
+          </div>
+        ))}
+      </div>
+      {proposals.length > 0 ? (
+        <div className="stack-list rule-proposals">
+          {proposals.map((proposal) => (
+            <div className="stack-row" key={proposal.merchant}>
+              <span>
+                <strong>{proposal.merchant}</strong>
+                <small>{proposal.count} similar transactions</small>
+              </span>
+              <select value={proposalCategoryId} onChange={(event) => setProposalCategoryId(event.target.value)}>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() =>
+                  void onSaveRule({
+                    ...createRecordMeta("rule"),
+                    name: `${proposal.merchant} rule`,
+                    priority: nextPriority,
+                    matchField: "description",
+                    operator: "contains",
+                    pattern: proposal.merchant,
+                    categoryId: proposalCategoryId,
+                    autoApply: true,
+                    active: true,
+                    hitCount: 0
+                  })
+                }
+              >
+                Approve rule
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ImportBatchPanel({ batches, onRollback }: { batches: ImportBatch[]; onRollback: (batch: ImportBatch) => Promise<void> }) {
+  if (batches.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Imports</p>
+          <h2>Import batches</h2>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-row header">
+          <span>File</span>
+          <span>Imported</span>
+          <span>Rows</span>
+          <span>New</span>
+          <span>Review</span>
+          <span>Action</span>
+        </div>
+        {batches.map((batch) => (
+          <div className="data-row" key={batch.id}>
+            <span>
+              <strong>{batch.fileName}</strong>
+              <small>{batch.fileHash.slice(0, 12)}</small>
+            </span>
+            <span>{new Date(batch.importedAt).toLocaleString("en-MY")}</span>
+            <span>{batch.rowCount}</span>
+            <span>{batch.newCount}</span>
+            <span>{batch.reviewCount}</span>
+            <button className="secondary-action" type="button" onClick={() => void onRollback(batch)}>
+              Roll back
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TransactionComposer({
+  accounts,
+  categories,
+  transactions,
+  defaultDate,
+  onCancel,
+  onSave
+}: {
+  accounts: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string; nature: string }>;
+  transactions: Transaction[];
+  defaultDate: string;
+  onCancel: () => void;
+  onSave: (draft: TransactionDraft) => Promise<void>;
+}) {
+  const [type, setType] = useState<TransactionDraft["type"]>("expense");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
+  const [toAccountId, setToAccountId] = useState(accounts[1]?.id ?? accounts[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(categories.find((category) => category.nature !== "administrative")?.id ?? categories[0]?.id ?? "");
+  const [occurredOn, setOccurredOn] = useState(defaultDate);
+  const [refundOfTransactionId, setRefundOfTransactionId] = useState("");
+  const [note, setNote] = useState("");
+  const [splits, setSplits] = useState<SplitDraft[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await onSave({
+        type,
+        occurredOn: occurredOn as TransactionDraft["occurredOn"],
+        description,
+        amountMinor: parseMoneyInput(amount),
+        accountId,
+        toAccountId: type === "transfer" ? toAccountId : undefined,
+        categoryId: type === "transfer" || splits.length > 0 ? undefined : categoryId,
+        splits: splits.length > 0 ? splits : undefined,
+        refundOfTransactionId: refundOfTransactionId || undefined,
+        note
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save transaction");
+    }
+  }
+
+  const parsedAmount = amount ? parseMoneyInputSafe(amount) : 0;
+  const splitTotal = splits.reduce((total, split) => total + split.amountMinor, 0);
+  const splitRemainder = Math.max(0, parsedAmount - splitTotal);
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Quick entry</p>
+          <h2>New transaction</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label>
+          Type
+          <select value={type} onChange={(event) => setType(event.target.value as TransactionDraft["type"])}>
+            {transactionTypes.map((item) => (
+              <option key={item} value={item}>
+                {item.replaceAll("_", " ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="span-2">
+          Description
+          <input value={description} onChange={(event) => setDescription(event.target.value)} required />
+        </label>
+        <label>
+          Amount
+          <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="RM42.00" required />
+        </label>
+        <label>
+          Date
+          <input type="date" value={occurredOn} onChange={(event) => setOccurredOn(event.target.value)} required />
+        </label>
+        <label>
+          Account
+          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {type === "transfer" ? (
+          <label>
+            To account
+            <select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            Category
+            <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {type === "refund" || type === "reimbursement" ? (
+          <label>
+            Original transaction
+            <select value={refundOfTransactionId} onChange={(event) => setRefundOfTransactionId(event.target.value)}>
+              <option value="">Not linked</option>
+              {transactions
+                .filter((transaction) => transaction.type === "expense")
+                .slice(0, 20)
+                .map((transaction) => (
+                  <option key={transaction.id} value={transaction.id}>
+                    {transaction.description}
+                  </option>
+                ))}
+            </select>
+          </label>
+        ) : null}
+        <label className="span-3">
+          Note
+          <input value={note} onChange={(event) => setNote(event.target.value)} />
+        </label>
+
+        {type !== "transfer" ? (
+          <div className="span-3 split-box">
+            <div className="inline-heading">
+              <strong>Splits</strong>
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => setSplits((current) => [...current, { categoryId, amountMinor: splitRemainder }])}
+              >
+                Add split
+              </button>
+            </div>
+            {splits.map((split, index) => (
+              <div className="split-row" key={`${split.categoryId}-${index}`}>
+                <select
+                  value={split.categoryId}
+                  onChange={(event) =>
+                    setSplits((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, categoryId: event.target.value } : item)))
+                  }
+                >
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  inputMode="decimal"
+                  value={(split.amountMinor / 100).toFixed(2)}
+                  onChange={(event) =>
+                    setSplits((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, amountMinor: parseMoneyInputSafe(event.target.value) } : item
+                      )
+                    )
+                  }
+                />
+                <button className="icon-button" type="button" aria-label="Remove split" onClick={() => setSplits((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                  <RotateCcw size={15} aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+            {splits.length > 0 ? <small>Remainder: RM{(splitRemainder / 100).toFixed(2)}</small> : null}
+          </div>
+        ) : null}
+
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button type="button" className="secondary-action" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="primary-action">
+            Save
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function CsvImportPanel({ accounts, onImport }: { accounts: Array<{ id: string; name: string }>; onImport: (text: string, accountId: string) => Promise<void> }) {
+  const [text, setText] = useState("date,description,amount,reference\n2026-07-12,Example Grocer,-12.30,DEMO-001");
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await onImport(text, accountId);
+      setOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "CSV import failed");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">CSV import</p>
+          <h2>Bank or wallet rows</h2>
+        </div>
+        <button className="secondary-action" type="button" onClick={() => setOpen((current) => !current)}>
+          <Upload size={16} aria-hidden="true" />
+          Import
+        </button>
+      </div>
+      {open ? (
+        <form className="form-grid" onSubmit={submit}>
+          <label>
+            Target account
+            <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="span-3">
+            CSV rows
+            <textarea rows={6} value={text} onChange={(event) => setText(event.target.value)} />
+          </label>
+          {error ? <p className="form-error span-3">{error}</p> : null}
+          <div className="form-actions span-3">
+            <button className="secondary-action" type="button" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button className="primary-action" type="submit">
+              <FileDown size={16} aria-hidden="true" />
+              Analyse and import
+            </button>
+          </div>
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+function parseMoneyInputSafe(value: string): number {
+  try {
+    return parseMoneyInput(value);
+  } catch {
+    return 0;
+  }
+}
