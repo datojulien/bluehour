@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
-import { deserializeSnapshotFromSheets, pushSnapshotToGoogleSheet, serializeSnapshotToSheets } from "./sheetSerialization";
+import { deserializeSnapshotFromSheets, pushSnapshotToGoogleSheet, readSnapshotFromGoogleSheet, serializeSnapshotToSheets } from "./sheetSerialization";
 
 describe("sheet serialization", () => {
   it("serializes domain tables into readable raw rows", () => {
@@ -111,5 +111,87 @@ describe("sheet serialization", () => {
 
     expect(sheet.get("A_Accounts!A1:ZZZ")).toEqual([["id", "name"], ["old", "Old active account"]]);
     expect(sheet.get("Meta!A1:ZZZ")).toContainEqual(["activeSlot", "A"]);
+  });
+
+  it("rejects staged Google writes when read-back records differ with the same row count", async () => {
+    const sheet = new Map<string, unknown[][]>([
+      [
+        "Meta!A1:ZZZ",
+        [
+          ["key", "value"],
+          ["schemaVersion", 2],
+          ["remoteRevision", 3],
+          ["activeSlot", "A"]
+        ]
+      ]
+    ]);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const pathname = decodeURIComponent(url.pathname);
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+
+      if (url.pathname.endsWith("values:batchGet")) {
+        const valueRanges = url.searchParams.getAll("ranges").map((range) => {
+          const values = sheet.get(range) ?? [];
+          if (range === "B_Accounts!A1:ZZZ" && values.length > 1) {
+            const nameIndex = values[0].indexOf("name");
+            const corrupted = values.map((row) => [...row]);
+            corrupted[1][nameIndex] = "Corrupted account name";
+            return { range, values: corrupted };
+          }
+
+          return { range, values };
+        });
+        return new Response(JSON.stringify({ valueRanges }), { status: 200 });
+      }
+
+      const range = pathname.match(/\/values\/(.+?)(?::clear)?$/)?.[1];
+      if (range && !url.pathname.endsWith(":clear")) {
+        sheet.set(range.replace("!A1", "!A1:ZZZ"), body.values);
+      }
+
+      return new Response("{}", { status: 200 });
+    });
+
+    await expect(pushSnapshotToGoogleSheet("sheet-1", createDemoSnapshot(), "token", fetcher as unknown as typeof fetch)).rejects.toThrow(
+      /verification failed for Accounts/
+    );
+  });
+
+  it("validates remote Sheet records against runtime schemas", () => {
+    const payload = serializeSnapshotToSheets(createDemoSnapshot());
+    const currencyIndex = payload.Accounts[0].indexOf("currency");
+    payload.Accounts[1][currencyIndex] = "USD";
+
+    expect(() => deserializeSnapshotFromSheets(payload)).toThrow(/failed schema validation/);
+  });
+
+  it("reads a legacy single-slot Sheet as a migration source", async () => {
+    const legacyPayload = serializeSnapshotToSheets(createDemoSnapshot(), 4);
+    legacyPayload.Meta = [
+      ["key", "value"],
+      ["schemaVersion", 1],
+      ["remoteRevision", 4]
+    ];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const ranges = url.searchParams.getAll("ranges");
+      return new Response(
+        JSON.stringify({
+          valueRanges: ranges.map((range) => ({
+            range,
+            values: legacyPayload[range.split("!")[0]] ?? []
+          }))
+        }),
+        { status: 200 }
+      );
+    });
+
+    const remote = await readSnapshotFromGoogleSheet("legacy-sheet", "token", fetcher as unknown as typeof fetch);
+
+    expect(remote.schemaVersion).toBe(1);
+    expect(remote.remoteRevision).toBe(4);
+    expect(remote.activeSlot).toBeUndefined();
+    expect(remote.snapshot.accounts?.length).toBeGreaterThan(0);
   });
 });

@@ -2,11 +2,12 @@ import { useMemo, useState, type FormEvent } from "react";
 import { Check, Save } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateAccountBalances } from "../../domain/accounts/calculations";
-import { formatDisplayDate } from "../../domain/dates";
+import { formatDisplayDate, isOnOrAfter } from "../../domain/dates";
 import { closeSalaryCycleWithActualSalary } from "../../domain/forecasting/cycleCommands";
-import { parseMoneyInput } from "../../domain/money";
+import { parseMoneyInput, percentageOfMinor } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import type { BudgetCycle, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
+import { calculateCategoryActuals } from "../../domain/transactions/calculations";
+import type { BudgetAllocation, BudgetCycle, Category, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
@@ -42,7 +43,26 @@ export function ReviewPage() {
   }
 
   const weeklyReview = snapshot.reviewSessions.find((review) => isActive(review) && review.type === "weekly");
+  const csvReviews = snapshot.reviewSessions.filter((review) => isActive(review) && review.periodKey.startsWith("csv:") && review.status === "open");
+  const ruleReviews = snapshot.reviewSessions.filter((review) => isActive(review) && review.periodKey.startsWith("rule:") && review.status === "open");
   const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
+  const activeAccounts = snapshot.accounts.filter(isActive);
+  const cycleCloseReview = activeCycle
+    ? snapshot.reviewSessions.find((review) => isActive(review) && review.type === "cycle_close" && review.periodKey === activeCycle.id)
+    : undefined;
+  const reconciliationComplete = activeCycle
+    ? activeAccounts
+        .filter((account) => account.reconcileWeekly)
+        .every((account) =>
+          snapshot.reconciliations.some(
+            (reconciliation) =>
+              isActive(reconciliation) &&
+              reconciliation.accountId === account.id &&
+              ["matched", "resolved", "adjusted"].includes(reconciliation.status) &&
+              isOnOrAfter(reconciliation.asOfDate, activeCycle.startedOn)
+          )
+        )
+    : false;
 
   async function toggleChecklistItem(review: ReviewSession, itemId: string) {
     const items = parseItems(review).map((item) => (item.id === itemId ? { ...item, complete: !item.complete } : item));
@@ -56,6 +76,32 @@ export function ReviewPage() {
         completedAt: completed ? new Date().toISOString() : undefined
       },
       "review checklist"
+    );
+  }
+
+  async function completeReview(review: ReviewSession) {
+    await saveRecord(
+      "reviewSessions",
+      {
+        ...touchRecord(review),
+        status: "completed",
+        completedAt: new Date().toISOString()
+      },
+      "review checklist"
+    );
+  }
+
+  async function createCycleCloseReview(cycle: BudgetCycle) {
+    await saveRecord(
+      "reviewSessions",
+      {
+        ...createRecordMeta("review"),
+        type: "cycle_close",
+        periodKey: cycle.id,
+        status: "open",
+        itemsJson: JSON.stringify(cycleCloseChecklistItems())
+      },
+      "cycle close checklist"
     );
   }
 
@@ -155,15 +201,72 @@ export function ReviewPage() {
         </div>
       </section>
 
+      {csvReviews.length > 0 ? (
+        <section className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">CSV import</p>
+              <h2>Uncertain duplicate rows</h2>
+            </div>
+          </div>
+          <div className="stack-list">
+            {csvReviews.map((review) => (
+              <div className="stack-row" key={review.id}>
+                <span>
+                  <strong>{review.periodKey.replace("csv:", "Import ")}</strong>
+                  <small>{parseCsvReviewItems(review).length} row{parseCsvReviewItems(review).length === 1 ? "" : "s"} need manual review.</small>
+                </span>
+                <button className="secondary-action" type="button" onClick={() => void completeReview(review)}>
+                  Mark reviewed
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {ruleReviews.length > 0 ? (
+        <section className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Categorisation</p>
+              <h2>Rule application conflicts</h2>
+            </div>
+          </div>
+          <div className="stack-list">
+            {ruleReviews.map((review) => (
+              <div className="stack-row" key={review.id}>
+                <span>
+                  <strong>{review.periodKey.replace("rule:", "Rule ")}</strong>
+                  <small>{parseCsvReviewItems(review).length} historical transaction{parseCsvReviewItems(review).length === 1 ? "" : "s"} need a category decision.</small>
+                </span>
+                <button className="secondary-action" type="button" onClick={() => void completeReview(review)}>
+                  Mark reviewed
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {activeCycle ? (
         <CycleClosePanel
           cycle={activeCycle}
-          accounts={snapshot.accounts.filter(isActive)}
+          accounts={activeAccounts}
           incomeCategoryId={snapshot.categories.find((category) => category.name === "Income")?.id ?? "cat-income"}
           categories={snapshot.categories}
           allocations={snapshot.budgetAllocations}
           plans={snapshot.planInstances.filter(isActive)}
           transactions={snapshot.transactions.filter(isActive)}
+          transactionSplits={snapshot.transactionSplits.filter(isActive)}
+          cycleCloseReview={cycleCloseReview}
+          reconciliationComplete={reconciliationComplete}
+          onCreateCycleCloseReview={() => createCycleCloseReview(activeCycle)}
+          onToggleCycleCloseItem={(itemId) => {
+            if (cycleCloseReview) {
+              void toggleChecklistItem(cycleCloseReview, itemId);
+            }
+          }}
           onClose={async (result) => {
             await saveRecords(
               [
@@ -192,15 +295,25 @@ function CycleClosePanel({
   allocations,
   plans,
   transactions,
+  transactionSplits,
+  cycleCloseReview,
+  reconciliationComplete,
+  onCreateCycleCloseReview,
+  onToggleCycleCloseItem,
   onClose
 }: {
   cycle: BudgetCycle;
   accounts: Array<{ id: string; name: string }>;
   incomeCategoryId: string;
-  categories: Parameters<typeof closeSalaryCycleWithActualSalary>[0]["categories"];
-  allocations: Parameters<typeof closeSalaryCycleWithActualSalary>[0]["allocations"];
-  plans: Array<{ id: string; name: string; expectedAmountMinor: number; status: string; linkedTransactionId?: string }>;
+  categories: readonly Category[];
+  allocations: readonly BudgetAllocation[];
+  plans: Array<{ id: string; name: string; expectedDate: string; expectedAmountMinor: number; status: string; linkedTransactionId?: string }>;
   transactions: Transaction[];
+  transactionSplits: TransactionSplit[];
+  cycleCloseReview?: ReviewSession;
+  reconciliationComplete: boolean;
+  onCreateCycleCloseReview: () => Promise<void>;
+  onToggleCycleCloseItem: (itemId: string) => void;
   onClose: (result: ReturnType<typeof closeSalaryCycleWithActualSalary>) => Promise<void>;
 }) {
   const [actualSalaryDate, setActualSalaryDate] = useState<string>(cycle.expectedNextSalaryTo);
@@ -210,12 +323,28 @@ function CycleClosePanel({
   const [error, setError] = useState<string | null>(null);
 
   const fulfilledPlans = plans.filter((plan) => plan.status === "fulfilled" && plan.linkedTransactionId);
+  const categoryResults = allocations
+    .filter((allocation) => isActive(allocation) && allocation.budgetCycleId === cycle.id)
+    .slice(0, 6)
+    .map((allocation) => {
+      const category = categories.find((item) => item.id === allocation.categoryId);
+      const spent = calculateCategoryActuals(allocation.categoryId, transactions, transactionSplits, cycle.startedOn, actualSalaryDate as BudgetCycle["startedOn"]);
+      return {
+        id: allocation.id,
+        name: category?.name ?? allocation.categoryId,
+        allocated: allocation.baseAmountMinor,
+        spent,
+        unused: Math.max(0, allocation.baseAmountMinor - spent)
+      };
+    });
+  const protectedTargetMinor =
+    percentageOfMinor(cycle.actualMainSalaryMinor, cycle.protectedRateBasisPoints) + (cycle.additionalProtectedCommitmentMinor ?? 0);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     try {
-      if (!skipNote.trim()) {
+      if (!reconciliationComplete && !skipNote.trim()) {
         throw new Error("Cycle close requires reconciliation or an explicit skip note");
       }
       await onClose(
@@ -227,6 +356,7 @@ function CycleClosePanel({
           incomeCategoryId,
           categories,
           allocations,
+          reconciliationComplete,
           skipReconciliationNote: skipNote
         })
       );
@@ -246,18 +376,77 @@ function CycleClosePanel({
         </div>
       </div>
       <div className="stack-list">
+        <div className="stack-row">
+          <span>
+            <strong>Reconciliation</strong>
+            <small>{reconciliationComplete ? "Enabled accounts have a reconciliation in this cycle." : "Close requires an explicit skip note."}</small>
+          </span>
+          <span>{reconciliationComplete ? "Complete" : "Skip note needed"}</span>
+        </div>
+        <div className="stack-row">
+          <span>
+            <strong>Protected target</strong>
+            <small>Minimum contribution expected for this salary cycle.</small>
+          </span>
+          <Amount value={protectedTargetMinor} />
+        </div>
         {fulfilledPlans.slice(0, 5).map((plan) => {
           const actual = transactions.find((transaction) => transaction.id === plan.linkedTransactionId);
+          const actualAmountMinor = actual ? transactionAmount(actual.id, transactionSplits) : 0;
+          const varianceMinor = actualAmountMinor - plan.expectedAmountMinor;
           return (
             <div className="stack-row" key={plan.id}>
               <span>
                 <strong>{plan.name}</strong>
-                <small>Expected versus actual preserved by plan link</small>
+                <small>
+                  Expected <Amount value={plan.expectedAmountMinor} /> · actual <Amount value={actualAmountMinor} /> · variance{" "}
+                  <Amount value={varianceMinor} />
+                </small>
               </span>
               <span>{actual ? formatDisplayDate(actual.occurredOn) : "Linked"}</span>
             </div>
           );
         })}
+      </div>
+      <div className="dashboard-subsection">
+        <div className="inline-heading">
+          <strong>Cycle-close checklist</strong>
+          {!cycleCloseReview ? (
+            <button className="secondary-action" type="button" onClick={() => void onCreateCycleCloseReview()}>
+              Create checklist
+            </button>
+          ) : null}
+        </div>
+        {cycleCloseReview ? (
+          <div className="checklist">
+            {parseItems(cycleCloseReview).map((item) => (
+              <button className={`check-item${item.complete ? " complete" : ""}`} type="button" key={item.id} onClick={() => onToggleCycleCloseItem(item.id)}>
+                <Check size={16} aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p>No cycle-close checklist has been created for this salary cycle.</p>
+        )}
+      </div>
+      <div className="dashboard-subsection">
+        <div className="inline-heading">
+          <strong>Category results</strong>
+        </div>
+        <div className="stack-list">
+          {categoryResults.map((result) => (
+            <div className="stack-row" key={result.id}>
+              <span>
+                <strong>{result.name}</strong>
+                <small>
+                  Allocated <Amount value={result.allocated} /> · spent <Amount value={result.spent} /> · unused expires{" "}
+                  <Amount value={result.unused} />
+                </small>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <form className="form-grid" onSubmit={submit}>
         <label>
@@ -279,8 +468,8 @@ function CycleClosePanel({
           </select>
         </label>
         <label className="span-3">
-          Reconciliation skip note
-          <input value={skipNote} onChange={(event) => setSkipNote(event.target.value)} required />
+          {reconciliationComplete ? "Cycle close note" : "Reconciliation skip note"}
+          <input value={skipNote} onChange={(event) => setSkipNote(event.target.value)} required={!reconciliationComplete} />
         </label>
         {error ? <p className="form-error span-3">{error}</p> : null}
         <div className="form-actions span-3">
@@ -291,6 +480,22 @@ function CycleClosePanel({
       </form>
     </section>
   );
+}
+
+function transactionAmount(transactionId: string, splits: readonly TransactionSplit[]): number {
+  return splits
+    .filter((split) => split.transactionId === transactionId)
+    .reduce((total, split) => {
+      if (split.direction === "expense") {
+        return total + split.amountMinor;
+      }
+
+      if (split.direction === "income" || split.direction === "reversal") {
+        return total + split.amountMinor;
+      }
+
+      return total;
+    }, 0);
 }
 
 function ReconciliationRow({
@@ -310,26 +515,27 @@ function ReconciliationRow({
   const [note, setNote] = useState("");
   const [createAdjustment, setCreateAdjustment] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const differenceMinor = parseMoneyInputSafe(stated) - calculatedBalanceMinor;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     try {
       const statedBalanceMinor = parseMoneyInput(stated);
-      const differenceMinor = statedBalanceMinor - calculatedBalanceMinor;
-      if (differenceMinor !== 0 && createAdjustment && !note.trim()) {
-        throw new Error("A reconciliation adjustment requires a note");
+      const nextDifferenceMinor = statedBalanceMinor - calculatedBalanceMinor;
+      if (nextDifferenceMinor !== 0 && !note.trim()) {
+        throw new Error(createAdjustment ? "A reconciliation adjustment requires a note" : "A reconciliation difference requires a note");
       }
 
-      const transactionId = differenceMinor !== 0 && createAdjustment ? createRecordMeta("txn").id : undefined;
+      const transactionId = nextDifferenceMinor !== 0 && createAdjustment ? createRecordMeta("txn").id : undefined;
       const reconciliation: Reconciliation = {
         ...createRecordMeta("recon"),
         accountId,
         asOfDate: date as Reconciliation["asOfDate"],
         calculatedBalanceMinor,
         statedBalanceMinor,
-        differenceMinor,
-        status: differenceMinor === 0 ? "matched" : createAdjustment ? "adjusted" : "skipped",
+        differenceMinor: nextDifferenceMinor,
+        status: nextDifferenceMinor === 0 ? "matched" : createAdjustment ? "adjusted" : "skipped",
         adjustmentTransactionId: transactionId,
         note: note || undefined
       };
@@ -353,7 +559,7 @@ function ReconciliationRow({
             ...createRecordMeta("leg"),
             transactionId: transaction.id,
             accountId,
-            deltaMinor: differenceMinor
+            deltaMinor: nextDifferenceMinor
           }
         : undefined;
       const split: TransactionSplit | undefined = transaction
@@ -361,8 +567,8 @@ function ReconciliationRow({
             ...createRecordMeta("split"),
             transactionId: transaction.id,
             categoryId: "cat-reconciliation",
-            direction: differenceMinor >= 0 ? "income" : "expense",
-            amountMinor: Math.abs(differenceMinor)
+            direction: nextDifferenceMinor >= 0 ? "income" : "expense",
+            amountMinor: Math.abs(nextDifferenceMinor)
           }
         : undefined;
       await onSave({ reconciliation, transaction, leg, split });
@@ -378,8 +584,13 @@ function ReconciliationRow({
         <small>{date}</small>
       </span>
       <Amount value={calculatedBalanceMinor} />
-      <input value={stated} onChange={(event) => setStated(event.target.value)} inputMode="decimal" />
-      <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Required for adjustment" />
+      <span>
+        <input aria-label={`${accountName} institution balance`} value={stated} onChange={(event) => setStated(event.target.value)} inputMode="decimal" />
+        <small>
+          Difference <Amount value={differenceMinor} />
+        </small>
+      </span>
+      <input aria-label={`${accountName} reconciliation note`} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Required for any difference" />
       <span className="inline-actions">
         <label className="checkbox-label compact">
           <input type="checkbox" checked={createAdjustment} onChange={(event) => setCreateAdjustment(event.target.checked)} />
@@ -399,5 +610,33 @@ function parseItems(review: ReviewSession): ChecklistItem[] {
     return JSON.parse(review.itemsJson) as ChecklistItem[];
   } catch {
     return [];
+  }
+}
+
+function parseCsvReviewItems(review: ReviewSession): unknown[] {
+  try {
+    const parsed = JSON.parse(review.itemsJson) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function cycleCloseChecklistItems(): ChecklistItem[] {
+  return [
+    { id: "reconcile", label: "Reconcile all enabled accounts", complete: false },
+    { id: "plans", label: "Resolve incomplete plans", complete: false },
+    { id: "variance", label: "Review planned-versus-actual variance", complete: false },
+    { id: "categories", label: "Review category results", complete: false },
+    { id: "protected", label: "Confirm protected contribution", complete: false },
+    { id: "backup", label: "Download or confirm backup", complete: false }
+  ];
+}
+
+function parseMoneyInputSafe(value: string): number {
+  try {
+    return parseMoneyInput(value);
+  } catch {
+    return 0;
   }
 }

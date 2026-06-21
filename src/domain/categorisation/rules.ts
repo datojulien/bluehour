@@ -53,7 +53,7 @@ export function findRuleProposals(transactions: readonly Transaction[], minimumH
     .map(([merchant, count]) => ({ merchant, count }));
 }
 
-function matchesRule(input: RuleMatchInput, rule: CategorisationRule): boolean {
+export function matchesRule(input: RuleMatchInput, rule: CategorisationRule): boolean {
   if (rule.accountId && rule.accountId !== input.accountId) {
     return false;
   }

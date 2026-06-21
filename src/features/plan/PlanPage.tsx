@@ -5,6 +5,7 @@ import { addDays, formatDisplayDate } from "../../domain/dates";
 import { generateRecurringPlanInstances } from "../../domain/forecasting/recurrence";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta } from "../../domain/records";
+import type { TransactionDraft } from "../../domain/transactions/commands";
 import type { PlanInstance, RecurringRule } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
@@ -12,6 +13,7 @@ import { Amount } from "../../ui/Amount";
 export function PlanPage() {
   const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, saveTransaction } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
+  const [fulfillingPlanId, setFulfillingPlanId] = useState<string | null>(null);
 
   const plans = useMemo(
     () =>
@@ -36,6 +38,7 @@ export function PlanPage() {
 
   const accounts = snapshot.accounts.filter(isActive);
   const categories = snapshot.categories.filter((category) => isActive(category) && category.active);
+  const fulfillingPlan = fulfillingPlanId ? plans.find((plan) => plan.id === fulfillingPlanId) : undefined;
 
   return (
     <>
@@ -75,6 +78,21 @@ export function PlanPage() {
         />
       </section>
 
+      {fulfillingPlan ? (
+        <PlanFulfilmentForm
+          plan={fulfillingPlan}
+          accounts={accounts}
+          categories={categories}
+          defaultDate={asOfDate}
+          onCancel={() => setFulfillingPlanId(null)}
+          onSave={async (draft) => {
+            await saveTransaction(draft);
+            setFulfillingPlanId(null);
+            setMessage(`${fulfillingPlan.name} fulfilled with planned-versus-actual variance preserved.`);
+          }}
+        />
+      ) : null}
+
       <section className="dashboard-band">
         <div className="band-header">
           <div>
@@ -82,8 +100,8 @@ export function PlanPage() {
             <h2>Planned and expected items</h2>
           </div>
         </div>
-        <div className="data-table" role="table" aria-label="Plan instances">
-          <div className="data-row header" role="row">
+        <div className="data-table" role="region" aria-label="Plan instances">
+          <div className="data-row header">
             <span>Date</span>
             <span>Name</span>
             <span>Kind</span>
@@ -92,7 +110,7 @@ export function PlanPage() {
             <span>Action</span>
           </div>
           {plans.map((plan) => (
-            <div className="data-row" role="row" key={plan.id}>
+            <div className="data-row" key={plan.id}>
               <span>{formatDisplayDate(plan.expectedDate)}</span>
               <span>
                 <strong>{plan.name}</strong>
@@ -106,18 +124,7 @@ export function PlanPage() {
                   className="icon-button"
                   type="button"
                   aria-label={`Fulfil ${plan.name}`}
-                  onClick={() =>
-                    void saveTransaction({
-                      type: plan.kind === "income" ? "income" : "expense",
-                      occurredOn: asOfDate,
-                      description: plan.name,
-                      amountMinor: plan.expectedAmountMinor,
-                      accountId: accounts[0]?.id ?? "",
-                      categoryId: plan.categoryId ?? (plan.kind === "income" ? "cat-income" : "cat-uncategorised"),
-                      planInstanceId: plan.id,
-                      source: "recurring_confirmation"
-                    }).then(() => setMessage(`${plan.name} fulfilled as an actual transaction.`))
-                  }
+                  onClick={() => setFulfillingPlanId(plan.id)}
                 >
                   <CheckCircle2 size={16} aria-hidden="true" />
                 </button>
@@ -129,6 +136,128 @@ export function PlanPage() {
         </div>
       </section>
     </>
+  );
+}
+
+function PlanFulfilmentForm({
+  plan,
+  accounts,
+  categories,
+  defaultDate,
+  onCancel,
+  onSave
+}: {
+  plan: PlanInstance;
+  accounts: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string }>;
+  defaultDate: string;
+  onCancel: () => void;
+  onSave: (draft: TransactionDraft) => Promise<void>;
+}) {
+  const [actualDate, setActualDate] = useState(defaultDate);
+  const [actualAmount, setActualAmount] = useState((plan.expectedAmountMinor / 100).toFixed(2));
+  const [accountId, setAccountId] = useState(plan.accountId ?? accounts[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(plan.categoryId ?? (plan.kind === "income" ? "cat-income" : "cat-uncategorised"));
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const parsedAmount = actualAmount ? parseMoneyInputSafe(actualAmount) : 0;
+  const amountVariance = parsedAmount - plan.expectedAmountMinor;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      if (!accountId) {
+        throw new Error("Choose an account for the actual transaction");
+      }
+
+      await onSave({
+        type: plan.kind === "income" ? "income" : "expense",
+        occurredOn: actualDate as PlanInstance["expectedDate"],
+        description: plan.name,
+        amountMinor: parseMoneyInput(actualAmount),
+        accountId,
+        categoryId,
+        planInstanceId: plan.id,
+        note: note || `Expected ${formatDisplayDate(plan.expectedDate)} for RM${(plan.expectedAmountMinor / 100).toFixed(2)}.`,
+        source: "recurring_confirmation"
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not fulfil plan");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Confirmation</p>
+          <h2>Fulfil planned item</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="span-2">
+          Actual description
+          <input value={plan.name} readOnly />
+        </label>
+        <label>
+          Actual date
+          <input type="date" value={actualDate} onChange={(event) => setActualDate(event.target.value)} required />
+        </label>
+        <label>
+          Actual amount
+          <input value={actualAmount} onChange={(event) => setActualAmount(event.target.value)} inputMode="decimal" required />
+        </label>
+        <label>
+          Account
+          <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Category
+          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="span-3">
+          Note
+          <input value={note} onChange={(event) => setNote(event.target.value)} />
+        </label>
+        <dl className="summary-list span-3">
+          <div>
+            <dt>Expected</dt>
+            <dd>
+              {formatDisplayDate(plan.expectedDate)} · <Amount value={plan.expectedAmountMinor} />
+            </dd>
+          </div>
+          <div>
+            <dt>Variance</dt>
+            <dd>
+              <Amount value={amountVariance} />
+            </dd>
+          </div>
+        </dl>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="secondary-action" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="primary-action" type="submit">
+            Confirm actual
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -345,4 +474,12 @@ function RecurringRuleForm({
       </form>
     </section>
   );
+}
+
+function parseMoneyInputSafe(value: string): number {
+  try {
+    return parseMoneyInput(value);
+  } catch {
+    return 0;
+  }
 }

@@ -35,3 +35,13 @@ export function calculateCategoryAllocation(
 export function calculateRemainingAllocation(allocationMinor: number, spentMinor: number): number {
   return Math.max(0, allocationMinor - spentMinor);
 }
+
+export function assertBudgetTransferSourceAvailable(sourceRemainingMinor: number, transferAmountMinor: number): void {
+  if (transferAmountMinor <= 0) {
+    throw new Error("Budget transfer amount must be greater than RM0.00");
+  }
+
+  if (transferAmountMinor > sourceRemainingMinor) {
+    throw new Error("Budget transfer source does not have enough available allocation");
+  }
+}

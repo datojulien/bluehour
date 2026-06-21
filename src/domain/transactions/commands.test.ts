@@ -62,4 +62,29 @@ describe("transaction commands", () => {
     expect(result.updatedPlan?.status).toBe("fulfilled");
     expect(result.updatedPlan?.linkedTransactionId).toBe(result.transaction.id);
   });
+
+  it("prevents a planned item from being fulfilled twice", () => {
+    const snapshot = createDemoSnapshot();
+    const fulfilledSnapshot = {
+      ...snapshot,
+      planInstances: snapshot.planInstances.map((plan) =>
+        plan.id === "plan-insurance" ? { ...plan, status: "fulfilled" as const, linkedTransactionId: "txn-existing" } : plan
+      )
+    };
+
+    expect(() =>
+      createTransactionRecords(
+        {
+          type: "expense",
+          occurredOn: "2026-07-16",
+          description: "Insurance premium",
+          amountMinor: 18_000,
+          accountId: "acc-meranti-current",
+          categoryId: "cat-insurance",
+          planInstanceId: "plan-insurance"
+        },
+        fulfilledSnapshot
+      )
+    ).toThrow("Planned item has already been fulfilled or closed");
+  });
 });

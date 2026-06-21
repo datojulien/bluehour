@@ -2,19 +2,33 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Archive, FileDown, Plus, RotateCcw, Upload } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
-import { findRuleProposals } from "../../domain/categorisation/rules";
+import { findRuleProposals, matchesRule } from "../../domain/categorisation/rules";
 import { formatDisplayDate } from "../../domain/dates";
-import { hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
+import { detectDelimiter, hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
 import { scoreDuplicateMatch } from "../../domain/imports/duplicateMatching";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
 import { createTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
-import type { CategorisationRule, ImportBatch, RecordMeta, Transaction } from "../../domain/types";
+import type { CategorisationRule, ImportBatch, ImportProfile, RecordMeta, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 import type { LocalMutation } from "../../data/local-db/localDb";
 
 const transactionTypes = ["expense", "income", "transfer", "refund", "reimbursement"] as const;
+
+interface CsvImportOptions {
+  accountId: string;
+  fileName: string;
+  dateFormat: ImportProfile["dateFormat"];
+  mapping: {
+    date: string;
+    description: string;
+    signedAmount?: string;
+    debit?: string;
+    credit?: string;
+    reference?: string;
+  };
+}
 
 export function TransactionsPage() {
   const { snapshot, asOfDate, loading, error, saveTransaction, saveRecords, archiveRecord } = useBluehourData();
@@ -74,17 +88,27 @@ export function TransactionsPage() {
   const activeAccounts = snapshot.accounts.filter(isActive);
   const activeCategories = snapshot.categories.filter((category) => isActive(category) && category.active);
 
-  async function handleImport(text: string, accountId: string) {
+  async function handleImport(text: string, options: CsvImportOptions) {
     if (!snapshot) {
       return;
     }
 
-    const parsed = parseCsv(text);
-    const profile = snapshot.importProfiles[0];
+    const delimiter = detectDelimiter(text);
+    const parsed = parseCsv(text, delimiter);
+    const profile: ImportProfile = {
+      ...createRecordMeta("profile"),
+      name: `CSV profile ${new Date().toLocaleDateString("en-MY")}`,
+      accountId: options.accountId,
+      delimiter,
+      encoding: "utf-8",
+      dateFormat: options.dateFormat,
+      columnMappingJson: JSON.stringify(options.mapping),
+      signRulesJson: JSON.stringify({ signedAmount: Boolean(options.mapping.signedAmount), debitIsExpense: true })
+    };
     const batch: ImportBatch = {
       ...createRecordMeta("batch"),
-      importProfileId: profile?.id ?? "ad-hoc",
-      fileName: "browser-import.csv",
+      importProfileId: profile.id,
+      fileName: options.fileName,
       fileHash: await hashText(text),
       importedAt: new Date().toISOString(),
       rowCount: parsed.rows.length,
@@ -93,13 +117,17 @@ export function TransactionsPage() {
       reviewCount: 0
     };
 
-    const mutations: LocalMutation[] = [{ storeName: "importBatches", record: batch }];
+    const mutations: LocalMutation[] = [
+      { storeName: "importProfiles", record: profile },
+      { storeName: "importBatches", record: batch }
+    ];
+    const uncertainItems: Array<{ row: Record<string, string>; score: number; reasons: string[] }> = [];
 
     for (const row of parsed.rows) {
-      const date = parseCsvDate(row.date ?? row.Date ?? "", "YYYY-MM-DD");
-      const signedAmount = parseMoneyInput(row.amount ?? row.Amount ?? row.signedAmount ?? "0");
-      const description = row.description ?? row.Description ?? "Imported transaction";
-      const reference = row.reference ?? row.Reference ?? "";
+      const date = parseCsvDate(valueForColumn(row, options.mapping.date), options.dateFormat);
+      const signedAmount = signedAmountFromCsvRow(row, options.mapping);
+      const description = valueForColumn(row, options.mapping.description) || "Imported transaction";
+      const reference = options.mapping.reference ? valueForColumn(row, options.mapping.reference) : "";
       const amountMinor = Math.abs(signedAmount);
       const type = signedAmount >= 0 ? "income" : "expense";
       const duplicate = allTransactions
@@ -107,7 +135,7 @@ export function TransactionsPage() {
           scoreDuplicateMatch(
             {
               sourceReference: reference,
-              accountId,
+              accountId: options.accountId,
               amountMinor: signedAmount,
               occurredOn: date,
               description,
@@ -115,7 +143,7 @@ export function TransactionsPage() {
             },
             {
               sourceReference: transaction.importFingerprint,
-              accountId,
+              accountId: options.accountId,
               amountMinor: signedAmountForTransaction(transaction),
               occurredOn: transaction.occurredOn,
               description: transaction.description,
@@ -132,6 +160,7 @@ export function TransactionsPage() {
 
       if (duplicate?.outcome === "uncertain") {
         batch.reviewCount += 1;
+        uncertainItems.push({ row, score: duplicate.score, reasons: duplicate.reasons });
         continue;
       }
 
@@ -141,7 +170,7 @@ export function TransactionsPage() {
           occurredOn: date,
           description,
           amountMinor,
-          accountId,
+          accountId: options.accountId,
           categoryId: type === "income" ? "cat-income" : "cat-uncategorised",
           source: "csv_import",
           importBatchId: batch.id,
@@ -158,9 +187,22 @@ export function TransactionsPage() {
       }
     }
 
-    mutations[0] = { storeName: "importBatches", record: batch };
+    if (uncertainItems.length > 0) {
+      const review: ReviewSession = {
+        ...createRecordMeta("review"),
+        type: "daily",
+        periodKey: `csv:${batch.id}`,
+        status: "open",
+        itemsJson: JSON.stringify(uncertainItems)
+      };
+      mutations.push({ storeName: "reviewSessions", record: review });
+    }
+
+    mutations[1] = { storeName: "importBatches", record: batch };
     await saveRecords(mutations, "CSV import");
-    setMessage(`Imported ${batch.newCount} new rows. ${batch.matchedCount} strong duplicates skipped. ${batch.reviewCount} uncertain matches need review.`);
+    setMessage(
+      `Imported ${batch.newCount} new rows. ${batch.matchedCount} strong duplicates skipped. ${batch.reviewCount} uncertain matches saved for review.`
+    );
   }
 
   function signedAmountForTransaction(transaction: Transaction): number {
@@ -194,6 +236,79 @@ export function TransactionsPage() {
 
     await saveRecords(mutations, "import rollback");
     setMessage(`Archived ${importedTransactions.length} imported transaction${importedTransactions.length === 1 ? "" : "s"} from ${batch.fileName}.`);
+  }
+
+  async function applyRuleToHistory(rule: CategorisationRule) {
+    const mutations: LocalMutation[] = [];
+    const reviewItems: Array<{ transactionId: string; description: string; existingCategoryIds: string[]; proposedCategoryId: string }> = [];
+    let updatedSplitCount = 0;
+
+    for (const transaction of loadedSnapshot.transactions.filter((record) => isActive(record) && record.type === "expense")) {
+      const firstLeg = loadedSnapshot.transactionLegs.find((leg) => isActive(leg) && leg.transactionId === transaction.id);
+      if (
+        !matchesRule(
+          {
+            description: transaction.description,
+            merchantNormalized: transaction.merchantNormalized,
+            accountId: firstLeg?.accountId,
+            amountMinor: Math.abs(signedAmountForTransaction(transaction))
+          },
+          rule
+        )
+      ) {
+        continue;
+      }
+
+      const splits = loadedSnapshot.transactionSplits.filter((split) => isActive(split) && split.transactionId === transaction.id);
+      const uncategorised = splits.filter((split) => split.categoryId === "cat-uncategorised");
+      const conflicting = splits.filter((split) => split.categoryId !== "cat-uncategorised" && split.categoryId !== rule.categoryId);
+
+      uncategorised.forEach((split) => {
+        mutations.push({ storeName: "transactionSplits", record: { ...touchRecord(split), categoryId: rule.categoryId } });
+        updatedSplitCount += 1;
+      });
+
+      if (conflicting.length > 0) {
+        reviewItems.push({
+          transactionId: transaction.id,
+          description: transaction.description,
+          existingCategoryIds: [...new Set(conflicting.map((split) => split.categoryId))],
+          proposedCategoryId: rule.categoryId
+        });
+      }
+    }
+
+    if (updatedSplitCount > 0) {
+      mutations.push({
+        storeName: "categorisationRules",
+        record: {
+          ...touchRecord(rule),
+          hitCount: rule.hitCount + updatedSplitCount,
+          lastUsedAt: new Date().toISOString()
+        }
+      });
+    }
+
+    if (reviewItems.length > 0) {
+      mutations.push({
+        storeName: "reviewSessions",
+        record: {
+          ...createRecordMeta("review"),
+          type: "daily",
+          periodKey: `rule:${rule.id}`,
+          status: "open",
+          itemsJson: JSON.stringify(reviewItems)
+        }
+      });
+    }
+
+    if (mutations.length === 0) {
+      setMessage("No matching historical uncategorised transactions were found.");
+      return;
+    }
+
+    await saveRecords(mutations, "categorisation history");
+    setMessage(`${updatedSplitCount} split${updatedSplitCount === 1 ? "" : "s"} updated. ${reviewItems.length} conflict${reviewItems.length === 1 ? "" : "s"} saved for review.`);
   }
 
   return (
@@ -250,12 +365,15 @@ export function TransactionsPage() {
 
       <RuleReviewPanel
         rules={snapshot.categorisationRules.filter(isActive)}
-        transactions={transactions}
+        transactions={allTransactions}
+        transactionLegs={snapshot.transactionLegs.filter(isActive)}
+        transactionSplits={snapshot.transactionSplits.filter(isActive)}
         categories={activeCategories}
         onSaveRule={async (rule) => {
           await saveRecords([{ storeName: "categorisationRules", record: rule }], "categorisation rule");
           setMessage("Categorisation rule saved for future transactions.");
         }}
+        onApplyRule={applyRuleToHistory}
       />
 
       <ImportBatchPanel batches={snapshot.importBatches.filter(isActive)} onRollback={rollbackImportBatch} />
@@ -267,8 +385,8 @@ export function TransactionsPage() {
             <h2>Ledger records</h2>
           </div>
         </div>
-        <div className="data-table" role="table" aria-label="Transactions">
-          <div className="data-row header" role="row">
+        <div className="data-table" role="region" aria-label="Transactions">
+          <div className="data-row header">
             <span>Date</span>
             <span>Description</span>
             <span>Account</span>
@@ -282,7 +400,7 @@ export function TransactionsPage() {
             const primaryLeg = legs[0];
             const amount = Math.abs(signedAmountForTransaction(transaction) || primaryLeg?.deltaMinor || 0);
             return (
-              <div className="data-row" role="row" key={transaction.id}>
+              <div className="data-row" key={transaction.id}>
                 <span>{formatDisplayDate(transaction.occurredOn)}</span>
                 <span>
                   <strong>{transaction.description}</strong>
@@ -316,19 +434,42 @@ function archiveRecordValue<T extends RecordMeta>(record: T): T {
 function RuleReviewPanel({
   rules,
   transactions,
+  transactionLegs,
+  transactionSplits,
   categories,
-  onSaveRule
+  onSaveRule,
+  onApplyRule
 }: {
   rules: CategorisationRule[];
   transactions: Transaction[];
+  transactionLegs: TransactionLeg[];
+  transactionSplits: TransactionSplit[];
   categories: Array<{ id: string; name: string }>;
   onSaveRule: (rule: CategorisationRule) => Promise<void>;
+  onApplyRule: (rule: CategorisationRule) => Promise<void>;
 }) {
   const [proposalCategoryId, setProposalCategoryId] = useState(categories[0]?.id ?? "");
   const proposals = findRuleProposals(transactions).filter((proposal) =>
     !rules.some((rule) => rule.active && rule.operator === "contains" && rule.pattern.toLowerCase() === proposal.merchant.toLowerCase())
   );
   const nextPriority = Math.max(0, ...rules.map((rule) => rule.priority)) + 10;
+  const transactionAmount = (transactionId: string) =>
+    transactionSplits
+      .filter((split) => split.transactionId === transactionId)
+      .reduce((total, split) => total + split.amountMinor, 0);
+  const historicalMatchCount = (rule: CategorisationRule) =>
+    transactions.filter((transaction) => {
+      const firstLeg = transactionLegs.find((leg) => leg.transactionId === transaction.id);
+      return matchesRule(
+        {
+          description: transaction.description,
+          merchantNormalized: transaction.merchantNormalized,
+          accountId: firstLeg?.accountId,
+          amountMinor: transactionAmount(transaction.id)
+        },
+        rule
+      );
+    }).length;
 
   return (
     <section className="dashboard-band">
@@ -359,13 +500,18 @@ function RuleReviewPanel({
             <span>{categories.find((category) => category.id === rule.categoryId)?.name ?? rule.categoryId}</span>
             <span>{rule.hitCount}</span>
             <span>{rule.active ? "active" : "disabled"}</span>
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={() => void onSaveRule({ ...touchRecord(rule), active: !rule.active })}
-            >
-              {rule.active ? "Disable" : "Enable"}
-            </button>
+            <span className="inline-actions">
+              <button className="secondary-action" type="button" onClick={() => void onApplyRule(rule)}>
+                Apply to {historicalMatchCount(rule)}
+              </button>
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => void onSaveRule({ ...touchRecord(rule), active: !rule.active })}
+              >
+                {rule.active ? "Disable" : "Enable"}
+              </button>
+            </span>
           </div>
         ))}
       </div>
@@ -658,10 +804,21 @@ function CsvImportPanel({
 }: {
   accounts: Array<{ id: string; name: string }>;
   defaultDate: string;
-  onImport: (text: string, accountId: string) => Promise<void>;
+  onImport: (text: string, options: CsvImportOptions) => Promise<void>;
 }) {
   const [text, setText] = useState(`date,description,amount,reference\n${defaultDate},Example Grocer,-12.30,SAMPLE-001`);
+  const [fileName, setFileName] = useState("Manual paste");
+  const [encodingConfirmed, setEncodingConfirmed] = useState(true);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
+  const parsed = useMemo(() => parseCsv(text), [text]);
+  const firstHeader = parsed.headers[0] ?? "";
+  const [dateColumn, setDateColumn] = useState("date");
+  const [descriptionColumn, setDescriptionColumn] = useState("description");
+  const [signedAmountColumn, setSignedAmountColumn] = useState("amount");
+  const [debitColumn, setDebitColumn] = useState("");
+  const [creditColumn, setCreditColumn] = useState("");
+  const [referenceColumn, setReferenceColumn] = useState("reference");
+  const [dateFormat, setDateFormat] = useState<ImportProfile["dateFormat"]>("YYYY-MM-DD");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -669,10 +826,40 @@ function CsvImportPanel({
     event.preventDefault();
     setError(null);
     try {
-      await onImport(text, accountId);
+      if (!encodingConfirmed) {
+        throw new Error("Confirm the CSV is UTF-8 before importing");
+      }
+      await onImport(text, {
+        accountId,
+        fileName,
+        dateFormat,
+        mapping: {
+          date: dateColumn || firstHeader,
+          description: descriptionColumn || firstHeader,
+          signedAmount: signedAmountColumn || undefined,
+          debit: debitColumn || undefined,
+          credit: creditColumn || undefined,
+          reference: referenceColumn || undefined
+        }
+      });
       setOpen(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "CSV import failed");
+    }
+  }
+
+  async function loadFile(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setError(null);
+    try {
+      setText(await file.text());
+      setFileName(file.name);
+      setEncodingConfirmed(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not read CSV file");
     }
   }
 
@@ -690,6 +877,14 @@ function CsvImportPanel({
       </div>
       {open ? (
         <form className="form-grid" onSubmit={submit}>
+          <label className="span-2">
+            CSV file
+            <input type="file" accept=".csv,text/csv,text/plain" onChange={(event) => void loadFile(event.target.files?.[0])} />
+          </label>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={encodingConfirmed} onChange={(event) => setEncodingConfirmed(event.target.checked)} />
+            UTF-8 confirmed
+          </label>
           <label>
             Target account
             <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
@@ -700,10 +895,49 @@ function CsvImportPanel({
               ))}
             </select>
           </label>
-          <label className="span-3">
-            CSV rows
-            <textarea rows={6} value={text} onChange={(event) => setText(event.target.value)} />
+          <label>
+            Date format
+            <select value={dateFormat} onChange={(event) => setDateFormat(event.target.value as ImportProfile["dateFormat"])}>
+              <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+            </select>
           </label>
+          <label>
+            Date column
+            <ColumnSelect headers={parsed.headers} value={dateColumn} onChange={setDateColumn} required />
+          </label>
+          <label>
+            Description column
+            <ColumnSelect headers={parsed.headers} value={descriptionColumn} onChange={setDescriptionColumn} required />
+          </label>
+          <label>
+            Signed amount column
+            <ColumnSelect headers={parsed.headers} value={signedAmountColumn} onChange={setSignedAmountColumn} />
+          </label>
+          <label>
+            Debit column
+            <ColumnSelect headers={parsed.headers} value={debitColumn} onChange={setDebitColumn} />
+          </label>
+          <label>
+            Credit column
+            <ColumnSelect headers={parsed.headers} value={creditColumn} onChange={setCreditColumn} />
+          </label>
+          <label>
+            Reference column
+            <ColumnSelect headers={parsed.headers} value={referenceColumn} onChange={setReferenceColumn} />
+          </label>
+          <label className="span-3">
+            CSV rows · {fileName}
+            <textarea
+              rows={6}
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                setFileName("Manual paste");
+              }}
+            />
+          </label>
+          <p className="form-note span-3">{parsed.rows.length} row{parsed.rows.length === 1 ? "" : "s"} ready for local preview and duplicate analysis.</p>
           {error ? <p className="form-error span-3">{error}</p> : null}
           <div className="form-actions span-3">
             <button className="secondary-action" type="button" onClick={() => setOpen(false)}>
@@ -718,6 +952,47 @@ function CsvImportPanel({
       ) : null}
     </section>
   );
+}
+
+function ColumnSelect({
+  headers,
+  value,
+  onChange,
+  required = false
+}: {
+  headers: string[];
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value)} required={required}>
+      <option value="">Not mapped</option>
+      {headers.map((header) => (
+        <option key={header} value={header}>
+          {header}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function signedAmountFromCsvRow(row: Record<string, string>, mapping: CsvImportOptions["mapping"]): number {
+  if (mapping.signedAmount) {
+    return parseMoneyInput(valueForColumn(row, mapping.signedAmount));
+  }
+
+  const debit = mapping.debit ? Math.abs(parseMoneyInput(valueForColumn(row, mapping.debit) || "0")) : 0;
+  const credit = mapping.credit ? Math.abs(parseMoneyInput(valueForColumn(row, mapping.credit) || "0")) : 0;
+  if (debit === 0 && credit === 0) {
+    throw new Error("Map either a signed amount column or debit/credit columns");
+  }
+
+  return credit - debit;
+}
+
+function valueForColumn(row: Record<string, string>, column: string): string {
+  return row[column] ?? "";
 }
 
 function parseMoneyInputSafe(value: string): number {

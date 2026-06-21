@@ -1,13 +1,17 @@
-import { CheckCircle2, Circle, Landmark, Plus } from "lucide-react";
+import { CheckCircle2, Circle, KeyRound, Landmark, Plus } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
+import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
+import { createBluehourSpreadsheet, createConnectionDescriptor } from "../../data/google/googleSheetsAdapter";
 import { createStarterCategories } from "../../domain/categories/starterCategories";
 import { formatDisplayDate } from "../../domain/dates";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import type { Account, AppSettings, BalanceSnapshot } from "../../domain/types";
+import type { Account, AppSettings, BalanceSnapshot, BudgetAllocation, Category, PlanInstance } from "../../domain/types";
 import { isActive } from "../../domain/types";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 const steps = [
   { id: "google", label: "Google" },
@@ -47,18 +51,18 @@ export function OnboardingPage() {
     );
   }
 
-  async function savePreferencesAndCategories() {
+  async function savePreferencesAndCategories(preferencesInput: PreferencesSettings) {
     const now = clock.now();
     const existing = snapshot?.settings.find((setting) => setting.key === "preferences");
     const preferences: AppSettings = existing
       ? {
           ...touchRecord(existing),
-          valueJson: JSON.stringify(defaultPreferences)
+          valueJson: JSON.stringify(preferencesInput)
         }
       : {
           ...createRecordMeta("settings"),
           key: "preferences",
-          valueJson: JSON.stringify(defaultPreferences)
+          valueJson: JSON.stringify(preferencesInput)
         };
     const categoryMutations =
       categories.length === 0
@@ -73,6 +77,32 @@ export function OnboardingPage() {
   async function markStepDone(nextStep: (typeof steps)[number]["id"]) {
     await setOnboardingStep(nextStep);
     setMessage(null);
+  }
+
+  async function connectGoogleFromOnboarding() {
+    if (!GOOGLE_CLIENT_ID) {
+      throw new Error("Restart the Vite dev server after adding VITE_GOOGLE_CLIENT_ID to .env");
+    }
+
+    try {
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+      const spreadsheetId = await createBluehourSpreadsheet(token);
+      const descriptor = createConnectionDescriptor(spreadsheetId);
+      const existing = snapshot?.settings.find((setting) => setting.key === "googleConnection");
+      const setting: AppSettings = existing
+        ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
+        : {
+            ...createRecordMeta("settings"),
+            key: "googleConnection",
+            valueJson: JSON.stringify(descriptor)
+          };
+
+      await saveRecords([{ storeName: "settings", record: setting }], "Google connection");
+      await setOnboardingStep("preferences");
+      setMessage("Google Sheet created. The access token was cleared from memory after setup.");
+    } finally {
+      clearInMemoryGoogleAccessToken();
+    }
   }
 
   return (
@@ -114,36 +144,15 @@ export function OnboardingPage() {
         {message ? <div className="alert-band">{message}</div> : null}
 
         {currentStep === "google" ? (
-          <SetupPanel
-            title="Connect or defer Google"
-            actionLabel="Defer Google for now"
-            onNext={() => void markStepDone("preferences")}
-          >
-            <p>Live data can be entered locally before a private Google Sheet is connected. Tokens are requested only from Settings.</p>
-          </SetupPanel>
+          <GoogleOnboardingPanel
+            hasClientId={Boolean(GOOGLE_CLIENT_ID)}
+            onConnect={connectGoogleFromOnboarding}
+            onDefer={() => void markStepDone("preferences")}
+          />
         ) : null}
 
         {currentStep === "preferences" ? (
-          <SetupPanel title="Preferences" actionLabel="Save defaults" onNext={() => void savePreferencesAndCategories()}>
-            <dl className="summary-list">
-              <div>
-                <dt>Currency</dt>
-                <dd>MYR</dd>
-              </div>
-              <div>
-                <dt>Salary window</dt>
-                <dd>24-26</dd>
-              </div>
-              <div>
-                <dt>Protected target</dt>
-                <dd>10%</dd>
-              </div>
-              <div>
-                <dt>Buffer</dt>
-                <dd>max(RM500, 10% of remaining essentials)</dd>
-              </div>
-            </dl>
-          </SetupPanel>
+          <PreferencesForm initialPreferences={preferencesFromSettings(snapshot.settings)} onSave={(preferences) => void savePreferencesAndCategories(preferences)} />
         ) : null}
 
         {currentStep === "accounts" ? (
@@ -165,21 +174,42 @@ export function OnboardingPage() {
         ) : null}
 
         {currentStep === "income" ? (
-          <SetupPanel title="Main and variable income" actionLabel="Continue" onNext={() => void markStepDone("obligations")}>
-            <p>Enter the actual main salary only when it arrives. Confirmed and possible extra income can be added later from Plan.</p>
-          </SetupPanel>
+          <IncomeSetupForm
+            date={asOfDate}
+            incomeCategoryId={categories.find((category) => category.id === "cat-income")?.id ?? "cat-income"}
+            onSkip={() => void markStepDone("obligations")}
+            onSave={async (plan) => {
+              await saveRecords([{ storeName: "planInstances", record: plan }], "onboarding income");
+              await setOnboardingStep("obligations");
+              setMessage("Income plan saved.");
+            }}
+          />
         ) : null}
 
         {currentStep === "obligations" ? (
-          <SetupPanel title="Known obligations" actionLabel="Continue" onNext={() => void markStepDone("budget")}>
-            <p>Add rent, utilities, subscriptions, debt repayments, and one-off commitments from Plan after setup.</p>
-          </SetupPanel>
+          <ObligationSetupForm
+            date={asOfDate}
+            categories={categories}
+            onSkip={() => void markStepDone("budget")}
+            onSave={async (plan) => {
+              await saveRecords([{ storeName: "planInstances", record: plan }], "onboarding obligation");
+              await setOnboardingStep("budget");
+              setMessage("Obligation saved.");
+            }}
+          />
         ) : null}
 
         {currentStep === "budget" ? (
-          <SetupPanel title="Guided first budget" actionLabel="Wait for salary" onNext={() => void markStepDone("wait_salary")}>
-            <p>The first cycles are observational. Bluehour will not move budget or apply suggestions without approval.</p>
-          </SetupPanel>
+          <BudgetTemplateForm
+            categories={categories}
+            existing={budgetTemplateFromSettings(snapshot.settings)}
+            existingSetting={snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")}
+            onSave={async (setting) => {
+              await saveRecords([{ storeName: "settings", record: setting }], "onboarding budget template");
+              await setOnboardingStep("wait_salary");
+              setMessage("Budget template saved for the first salary cycle.");
+            }}
+          />
         ) : null}
 
         {currentStep === "wait_salary" ? (
@@ -197,14 +227,25 @@ export function OnboardingPage() {
             date={asOfDate}
             accounts={accounts}
             incomeCategoryId={categories.find((category) => category.id === "cat-income")?.id ?? "cat-income"}
+            existingCycles={snapshot.budgetCycles}
             onSave={async (records) => {
+              const firstCycleAllocations = allocationsFromBudgetTemplate(records.cycle.id, snapshot.settings);
+              const archivedDestinationSetupSnapshots = snapshot.balanceSnapshots
+                .filter((record) => isActive(record) && record.accountId === records.openingSnapshot.accountId)
+                .map((record) => ({
+                  ...touchRecord(record),
+                  archivedAt: clock.now(),
+                  note: record.note ? `${record.note} Archived when the first salary boundary was created.` : "Archived when the first salary boundary was created."
+                }));
               await saveRecords(
                 [
+                  ...archivedDestinationSetupSnapshots.map((record) => ({ storeName: "balanceSnapshots" as const, record })),
                   { storeName: "balanceSnapshots", record: records.openingSnapshot },
                   { storeName: "transactions", record: records.salaryTransaction },
                   { storeName: "transactionLegs", record: records.salaryLeg },
                   { storeName: "transactionSplits", record: records.salarySplit },
-                  { storeName: "budgetCycles", record: records.cycle }
+                  { storeName: "budgetCycles", record: records.cycle },
+                  ...firstCycleAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record }))
                 ],
                 "first salary cycle"
               );
@@ -217,7 +258,59 @@ export function OnboardingPage() {
   );
 }
 
-const defaultPreferences = {
+function GoogleOnboardingPanel({
+  hasClientId,
+  onConnect,
+  onDefer
+}: {
+  hasClientId: boolean;
+  onConnect: () => Promise<void>;
+  onDefer: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function connect() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await onConnect();
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : "Google connection failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Live profile</p>
+          <h2>Connect or defer Google</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        <p>Bluehour can create a private app-managed Sheet now, or you can keep working locally and connect later in Settings.</p>
+        {!hasClientId ? (
+          <p className="form-note danger-text">No Google client ID is available in this running Vite session. Add it to `.env`, then restart `npm run dev`.</p>
+        ) : null}
+        <div className="form-actions">
+          <button className="primary-action" type="button" onClick={() => void connect()} disabled={busy || !hasClientId}>
+            <KeyRound size={16} aria-hidden="true" />
+            Connect Google
+          </button>
+          <button className="secondary-action" type="button" onClick={onDefer} disabled={busy}>
+            Defer Google for now
+          </button>
+        </div>
+        {status ? <p className="form-note danger-text">{status}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+const defaultPreferences: PreferencesSettings = {
   currency: "MYR",
   locale: "en-MY",
   dateDisplay: "DD/MM/YYYY",
@@ -229,6 +322,362 @@ const defaultPreferences = {
   bufferEssentialRateBasisPoints: 1_000,
   weeklyReconciliationDefault: true
 };
+
+interface PreferencesSettings {
+  currency: "MYR";
+  locale: string;
+  dateDisplay: string;
+  amountDisplay: string;
+  salaryWindowStartDay: number;
+  salaryWindowEndDay: number;
+  minimumProtectedRateBasisPoints: number;
+  bufferMinimumMinor: number;
+  bufferEssentialRateBasisPoints: number;
+  weeklyReconciliationDefault: boolean;
+}
+
+interface BudgetTemplate {
+  allocations: Array<{ categoryId: string; amountMinor: number }>;
+}
+
+function PreferencesForm({
+  initialPreferences,
+  onSave
+}: {
+  initialPreferences: PreferencesSettings;
+  onSave: (preferences: PreferencesSettings) => void;
+}) {
+  const [salaryWindowStartDay, setSalaryWindowStartDay] = useState(String(initialPreferences.salaryWindowStartDay));
+  const [salaryWindowEndDay, setSalaryWindowEndDay] = useState(String(initialPreferences.salaryWindowEndDay));
+  const [protectedRatePercent, setProtectedRatePercent] = useState(String(initialPreferences.minimumProtectedRateBasisPoints / 100));
+  const [bufferMinimum, setBufferMinimum] = useState((initialPreferences.bufferMinimumMinor / 100).toFixed(2));
+  const [bufferEssentialPercent, setBufferEssentialPercent] = useState(String(initialPreferences.bufferEssentialRateBasisPoints / 100));
+  const [weeklyReconciliationDefault, setWeeklyReconciliationDefault] = useState(initialPreferences.weeklyReconciliationDefault);
+  const [error, setError] = useState<string | null>(null);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const startDay = parseWholeNumber(salaryWindowStartDay, "Salary window start");
+      const endDay = parseWholeNumber(salaryWindowEndDay, "Salary window end");
+      if (startDay < 1 || startDay > 31 || endDay < startDay || endDay > 31) {
+        throw new Error("Salary window must be valid calendar days");
+      }
+
+      onSave({
+        ...initialPreferences,
+        salaryWindowStartDay: startDay,
+        salaryWindowEndDay: endDay,
+        minimumProtectedRateBasisPoints: percentTextToBasisPoints(protectedRatePercent),
+        bufferMinimumMinor: parseMoneyInput(bufferMinimum),
+        bufferEssentialRateBasisPoints: percentTextToBasisPoints(bufferEssentialPercent),
+        weeklyReconciliationDefault
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save preferences");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Live profile</p>
+          <h2>Preferences</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label>
+          Salary window start day
+          <input inputMode="numeric" value={salaryWindowStartDay} onChange={(event) => setSalaryWindowStartDay(event.target.value)} required />
+        </label>
+        <label>
+          Salary window end day
+          <input inputMode="numeric" value={salaryWindowEndDay} onChange={(event) => setSalaryWindowEndDay(event.target.value)} required />
+        </label>
+        <label>
+          Protected target %
+          <input inputMode="decimal" value={protectedRatePercent} onChange={(event) => setProtectedRatePercent(event.target.value)} required />
+        </label>
+        <label>
+          Minimum buffer
+          <input inputMode="decimal" value={bufferMinimum} onChange={(event) => setBufferMinimum(event.target.value)} required />
+        </label>
+        <label>
+          Essential buffer %
+          <input inputMode="decimal" value={bufferEssentialPercent} onChange={(event) => setBufferEssentialPercent(event.target.value)} required />
+        </label>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={weeklyReconciliationDefault} onChange={(event) => setWeeklyReconciliationDefault(event.target.checked)} />
+          Weekly reconciliation by default
+        </label>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="primary-action" type="submit">
+            Save preferences
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function IncomeSetupForm({
+  date,
+  incomeCategoryId,
+  onSave,
+  onSkip
+}: {
+  date: string;
+  incomeCategoryId: string;
+  onSave: (plan: PlanInstance) => Promise<void>;
+  onSkip: () => void;
+}) {
+  const [name, setName] = useState("Main salary estimate");
+  const [expectedDate, setExpectedDate] = useState(date);
+  const [amount, setAmount] = useState("");
+  const [confidence, setConfidence] = useState<PlanInstance["confidence"]>("confirmed");
+  const [isMainSalaryEstimate, setIsMainSalaryEstimate] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const amountMinor = parseMoneyInput(amount);
+      if (amountMinor <= 0) {
+        throw new Error("Income amount must be greater than RM0.00");
+      }
+
+      await onSave({
+        ...createRecordMeta("plan"),
+        kind: "income",
+        name,
+        expectedDate: expectedDate as PlanInstance["expectedDate"],
+        expectedAmountMinor: amountMinor,
+        confidence,
+        reservation: "informational",
+        status: "scheduled",
+        categoryId: incomeCategoryId,
+        isMainSalaryEstimate
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save income");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Live profile</p>
+          <h2>Main and variable income</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="span-2">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+        </label>
+        <label>
+          Expected date
+          <input type="date" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} required />
+        </label>
+        <label>
+          Amount
+          <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required />
+        </label>
+        <label>
+          Confidence
+          <select value={confidence} onChange={(event) => setConfidence(event.target.value as PlanInstance["confidence"])}>
+            <option value="confirmed">confirmed</option>
+            <option value="expected">expected</option>
+            <option value="possible">possible</option>
+          </select>
+        </label>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={isMainSalaryEstimate} onChange={(event) => setIsMainSalaryEstimate(event.target.checked)} />
+          Treat as main salary estimate
+        </label>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="secondary-action" type="button" onClick={onSkip}>
+            Skip for now
+          </button>
+          <button className="primary-action" type="submit">
+            Save income
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function ObligationSetupForm({
+  date,
+  categories,
+  onSave,
+  onSkip
+}: {
+  date: string;
+  categories: Category[];
+  onSave: (plan: PlanInstance) => Promise<void>;
+  onSkip: () => void;
+}) {
+  const reservableCategories = categories.filter((category) => category.nature !== "administrative" && category.nature !== "protected");
+  const [name, setName] = useState("Rent or fixed bill");
+  const [expectedDate, setExpectedDate] = useState(date);
+  const [amount, setAmount] = useState("");
+  const [categoryId, setCategoryId] = useState(reservableCategories[0]?.id ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const category = categories.find((item) => item.id === categoryId);
+      const amountMinor = parseMoneyInput(amount);
+      if (!category) {
+        throw new Error("Choose an obligation category");
+      }
+      if (amountMinor <= 0) {
+        throw new Error("Obligation amount must be greater than RM0.00");
+      }
+
+      await onSave({
+        ...createRecordMeta("plan"),
+        kind: "expense",
+        name,
+        expectedDate: expectedDate as PlanInstance["expectedDate"],
+        expectedAmountMinor: amountMinor,
+        confidence: "expected",
+        reservation: "reserved",
+        status: "scheduled",
+        categoryId,
+        essential: category.nature === "essential"
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save obligation");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Live profile</p>
+          <h2>Known obligations</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="span-2">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+        </label>
+        <label>
+          Due date
+          <input type="date" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} required />
+        </label>
+        <label>
+          Amount
+          <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required />
+        </label>
+        <label className="span-2">
+          Category
+          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+            {reservableCategories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="secondary-action" type="button" onClick={onSkip}>
+            Skip for now
+          </button>
+          <button className="primary-action" type="submit">
+            Save obligation
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function BudgetTemplateForm({
+  categories,
+  existing,
+  existingSetting,
+  onSave
+}: {
+  categories: Category[];
+  existing: BudgetTemplate;
+  existingSetting?: AppSettings;
+  onSave: (setting: AppSettings) => Promise<void>;
+}) {
+  const budgetCategories = categories.filter((category) => category.nature !== "administrative" && category.nature !== "protected" && category.reservationMode !== "plan");
+  const existingByCategory = new Map(existing.allocations.map((allocation) => [allocation.categoryId, allocation.amountMinor]));
+  const [amounts, setAmounts] = useState<Record<string, string>>(
+    Object.fromEntries(budgetCategories.map((category) => [category.id, ((existingByCategory.get(category.id) ?? 0) / 100).toFixed(2)]))
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const allocations = budgetCategories
+        .map((category) => ({
+          categoryId: category.id,
+          amountMinor: parseMoneyInput(amounts[category.id] ?? "0")
+        }))
+        .filter((allocation) => allocation.amountMinor > 0);
+      const setting: AppSettings = existingSetting
+        ? { ...touchRecord(existingSetting), valueJson: JSON.stringify({ allocations } satisfies BudgetTemplate) }
+        : {
+            ...createRecordMeta("settings"),
+            key: "onboardingBudgetTemplate",
+            valueJson: JSON.stringify({ allocations } satisfies BudgetTemplate)
+          };
+      await onSave(setting);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save budget template");
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Live profile</p>
+          <h2>Guided first budget</h2>
+        </div>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        {budgetCategories.map((category) => (
+          <label key={category.id}>
+            {category.name}
+            <input
+              inputMode="decimal"
+              value={amounts[category.id] ?? "0.00"}
+              onChange={(event) => setAmounts((current) => ({ ...current, [category.id]: event.target.value }))}
+            />
+          </label>
+        ))}
+        <p className="form-note span-3">These become the first cycle allocations when salary arrives. You can revise them after observing the first cycles.</p>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="primary-action" type="submit">
+            Save budget template
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
 
 function SetupPanel({
   title,
@@ -363,11 +812,13 @@ function FirstCycleForm({
   date,
   accounts,
   incomeCategoryId,
+  existingCycles,
   onSave
 }: {
   date: string;
   accounts: Account[];
   incomeCategoryId: string;
+  existingCycles: Parameters<typeof startFirstSalaryCycle>[0]["existingCycles"];
   onSave: (records: ReturnType<typeof startFirstSalaryCycle>) => Promise<void>;
 }) {
   const [salaryDate, setSalaryDate] = useState(date);
@@ -390,7 +841,8 @@ function FirstCycleForm({
           salaryDepositText: salaryDeposit,
           currentBalanceText: currentBalance,
           destinationAccountId,
-          incomeCategoryId
+          incomeCategoryId,
+          existingCycles
         })
       );
     } catch (caught) {
@@ -439,4 +891,57 @@ function FirstCycleForm({
       </form>
     </section>
   );
+}
+
+function preferencesFromSettings(settings: readonly AppSettings[]): PreferencesSettings {
+  const setting = settings.find((item) => item.key === "preferences");
+  if (!setting) {
+    return defaultPreferences;
+  }
+
+  try {
+    return { ...defaultPreferences, ...(JSON.parse(setting.valueJson) as Partial<PreferencesSettings>) };
+  } catch {
+    return defaultPreferences;
+  }
+}
+
+function budgetTemplateFromSettings(settings: readonly AppSettings[]): BudgetTemplate {
+  const setting = settings.find((item) => item.key === "onboardingBudgetTemplate");
+  if (!setting) {
+    return { allocations: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(setting.valueJson) as BudgetTemplate;
+    return Array.isArray(parsed.allocations) ? parsed : { allocations: [] };
+  } catch {
+    return { allocations: [] };
+  }
+}
+
+function allocationsFromBudgetTemplate(cycleId: string, settings: readonly AppSettings[]): BudgetAllocation[] {
+  return budgetTemplateFromSettings(settings).allocations.map((allocation) => ({
+    ...createRecordMeta("alloc"),
+    budgetCycleId: cycleId,
+    categoryId: allocation.categoryId,
+    baseAmountMinor: allocation.amountMinor,
+    note: "Created from onboarding budget template."
+  }));
+}
+
+function parseWholeNumber(value: string, label: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label} must be a whole number`);
+  }
+  return parsed;
+}
+
+function percentTextToBasisPoints(value: string): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("Percentage must be zero or greater");
+  }
+  return Math.round(parsed * 100);
 }

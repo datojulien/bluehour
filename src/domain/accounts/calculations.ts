@@ -1,4 +1,4 @@
-import { compareIsoDate, isOnOrAfter, isOnOrBefore } from "../dates";
+import { compareIsoDate, isOnOrBefore } from "../dates";
 import type { Account, BalanceSnapshot, IsoDate, Transaction, TransactionLeg } from "../types";
 import { isActive } from "../types";
 
@@ -27,7 +27,7 @@ export function calculateAccountBalance(
           return false;
         }
 
-        return snapshotDate ? isOnOrAfter(transaction.occurredOn, snapshotDate) : true;
+        return snapshotDate ? compareIsoDate(transaction.occurredOn, snapshotDate) > 0 : true;
       })
       .map((transaction) => transaction.id)
   );

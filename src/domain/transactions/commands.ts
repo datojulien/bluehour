@@ -84,9 +84,7 @@ export function createTransactionRecords(draft: TransactionDraft, snapshot: Blue
 
   const legs = buildLegs(transaction, draft);
   const splits = buildSplits(transaction, draft, selectedCategoryId);
-  const updatedPlan = draft.planInstanceId
-    ? snapshot.planInstances.find((plan) => plan.id === draft.planInstanceId && isActive(plan))
-    : undefined;
+  const updatedPlan = draft.planInstanceId ? planToFulfil(draft.planInstanceId, snapshot.planInstances) : undefined;
 
   return {
     transaction,
@@ -101,6 +99,19 @@ export function createTransactionRecords(draft: TransactionDraft, snapshot: Blue
       : undefined,
     updatedRule: ruleMatch?.updatedRule
   };
+}
+
+function planToFulfil(planInstanceId: string, plans: readonly PlanInstance[]): PlanInstance {
+  const plan = plans.find((item) => item.id === planInstanceId && isActive(item));
+  if (!plan) {
+    throw new Error("Planned item could not be found");
+  }
+
+  if (plan.status !== "scheduled") {
+    throw new Error("Planned item has already been fulfilled or closed");
+  }
+
+  return plan;
 }
 
 function buildLegs(transaction: Transaction, draft: TransactionDraft): TransactionLeg[] {

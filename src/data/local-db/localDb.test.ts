@@ -8,9 +8,11 @@ import {
   loadDemoSnapshot,
   loadLiveSnapshot,
   putLocalRecords,
+  replaceProfileSnapshot,
   resetDemoProfile,
   seedDemoIfNeeded
 } from "./localDb";
+import { createDemoSnapshot } from "../../test/fixtures/demoData";
 
 describe("local IndexedDB repository", () => {
   async function deleteDatabase(name: string): Promise<void> {
@@ -85,5 +87,29 @@ describe("local IndexedDB repository", () => {
     const reopened = await openDB(LEGACY_DB_NAME, 1);
     expect(await reopened.get("sentinel", "marker")).toBe("keep-me");
     reopened.close();
+  });
+
+  it("validates backup replacement before clearing the current profile", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    const account: Account = {
+      ...createRecordMeta("acc"),
+      name: "Keep me",
+      type: "bank",
+      role: "spendable",
+      trackingMode: "ledger",
+      currency: "MYR",
+      reconcileWeekly: true,
+      sortOrder: 1
+    };
+    await putLocalRecords("live", [{ storeName: "accounts", record: account }], "test account");
+
+    const invalid = {
+      ...createDemoSnapshot(),
+      accounts: [{ ...createDemoSnapshot().accounts[0], currency: "USD" as "MYR" }]
+    };
+
+    await expect(replaceProfileSnapshot("live", invalid)).rejects.toThrow();
+    const live = await loadLiveSnapshot();
+    expect(live.accounts.map((record) => record.name)).toEqual(["Keep me"]);
   });
 });

@@ -1,4 +1,5 @@
 import type { BluehourSnapshot } from "../../domain/types";
+import { syncedStoreSchemas } from "../local-db/validators";
 import {
   BLUEHOUR_SCHEMA_VERSION,
   GOOGLE_DOMAIN_TABS,
@@ -39,6 +40,8 @@ const STORE_BY_TAB = {
   ReviewSessions: "reviewSessions",
   Settings: "settings"
 } as const satisfies Record<(typeof GOOGLE_DOMAIN_TABS)[number], keyof BluehourSnapshot>;
+
+const JSON_STRING_COLUMNS = new Set(["columnMappingJson", "itemsJson", "localJson", "priceHistoryJson", "remoteJson", "signRulesJson", "valueJson"]);
 
 export function serializeSnapshotToSheets(snapshot: BluehourSnapshot, remoteRevision = currentRemoteRevision(snapshot) + 1): SheetPayload {
   return {
@@ -119,14 +122,21 @@ export async function readSnapshotFromGoogleSheet(
 export function deserializeSnapshotFromSheets(payload: SheetPayload): RemoteSheetSnapshot {
   const meta = keyValueRows(payload.Meta ?? []);
   const activeSlot = parseSlot(meta.activeSlot);
+  const snapshot = {} as Partial<BluehourSnapshot>;
+
+  for (const tab of GOOGLE_DOMAIN_TABS) {
+    const storeName = STORE_BY_TAB[tab];
+    const records = rowsToRecords(payload[tab]);
+    validateSheetRecords(tab, storeName, records);
+    Object.assign(snapshot, { [storeName]: records });
+  }
+
   return {
     remoteRevision: numberFromUnknown(meta.remoteRevision) ?? 0,
     schemaVersion: numberFromUnknown(meta.schemaVersion) ?? 1,
     activeSlot,
     exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : typeof meta.committedAt === "string" ? meta.committedAt : undefined,
-    snapshot: Object.fromEntries(
-      GOOGLE_DOMAIN_TABS.map((tab) => [STORE_BY_TAB[tab], rowsToRecords(payload[tab])])
-    ) as Partial<BluehourSnapshot>
+    snapshot
   };
 }
 
@@ -217,13 +227,25 @@ function rowsToRecords<T extends object>(rows: unknown[][] | undefined): T[] {
   return rows.slice(1).map((row) => {
     const record: Record<string, unknown> = {};
     headers.forEach((header, index) => {
-      const value = inferValue(row[index]);
+      const value = inferCellValue(header, row[index]);
       if (value !== undefined) {
         record[header] = value;
       }
     });
     return record as T;
   });
+}
+
+function inferCellValue(header: string, value: unknown): unknown {
+  if (!JSON_STRING_COLUMNS.has(header)) {
+    return inferValue(value);
+  }
+
+  if (value === "" || value === undefined) {
+    return undefined;
+  }
+
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function inferValue(value: unknown): unknown {
@@ -283,12 +305,43 @@ function normaliseSlotPayload(payload: SheetPayload, slot: GoogleSheetSlot): She
 
 function assertReadBackMatchesSnapshot(snapshot: BluehourSnapshot, slot: GoogleSheetSlot, readBack: SheetPayload): void {
   const normalised = normaliseSlotPayload(readBack, slot);
+  const expectedPayload = domainRows(snapshot);
   for (const tab of GOOGLE_DOMAIN_TABS) {
     const storeName = STORE_BY_TAB[tab];
-    const expectedCount = snapshot[storeName].length;
-    const actualCount = Math.max(0, (normalised[tab]?.length ?? 1) - 1);
-    if (actualCount !== expectedCount) {
+    const expectedRecords = rowsToRecords(expectedPayload[tab]);
+    const actualRecords = rowsToRecords(normalised[tab]);
+    validateSheetRecords(tab, storeName, actualRecords);
+    if (stableJson(actualRecords) !== stableJson(expectedRecords)) {
       throw new Error(`Google staged write verification failed for ${tab}`);
     }
   }
+}
+
+function validateSheetRecords(tab: string, storeName: keyof typeof syncedStoreSchemas, records: readonly object[]): void {
+  const schema = syncedStoreSchemas[storeName];
+  records.forEach((record, index) => {
+    try {
+      schema.parse(record);
+    } catch (caught) {
+      const detail = caught instanceof Error ? caught.message : "invalid record";
+      throw new Error(`Google Sheet ${tab} row ${index + 2} failed schema validation: ${detail}`, { cause: caught });
+    }
+  });
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
 }

@@ -1,4 +1,5 @@
 import type { LocalMutation, MutableStoreName } from "../local-db/localDb";
+import { BLUEHOUR_SCHEMA_VERSION } from "../google/googleSheetsAdapter";
 import { currentRemoteRevision, type RemoteSheetSnapshot } from "../google/sheetSerialization";
 import { createRecordMeta } from "../../domain/records";
 import type { BluehourSnapshot, ConflictRecord, OutboxOperation, SyncState } from "../../domain/types";
@@ -27,7 +28,7 @@ export const SYNCED_STORES = [
 export type SyncedStoreName = (typeof SYNCED_STORES)[number];
 
 export interface GoogleSyncPlan {
-  action: "push_local" | "no_op" | "apply_remote" | "conflict";
+  action: "push_local" | "no_op" | "apply_remote" | "conflict" | "read_only_recovery";
   remoteRevision: number;
   nextRemoteRevision: number;
   mutations: LocalMutation[];
@@ -40,6 +41,18 @@ export function planGoogleSheetSync(local: BluehourSnapshot, remote: RemoteSheet
   const localRemoteRevision = currentRemoteRevision(local);
   const pendingOutbox = local.outboxOperations;
   const nextRemoteRevision = Math.max(localRemoteRevision, remote.remoteRevision) + 1;
+
+  if ((remote.schemaVersion ?? 1) > BLUEHOUR_SCHEMA_VERSION) {
+    return statePlan(
+      "read_only_recovery",
+      remote.remoteRevision,
+      localRemoteRevision,
+      [],
+      [],
+      false,
+      `Google Sheet schema ${remote.schemaVersion} is newer than this Bluehour build supports.`
+    );
+  }
 
   if (remote.remoteRevision === 0) {
     return statePlan("push_local", remote.remoteRevision, nextRemoteRevision, [], [], true, "Remote Sheet is empty; local data should be pushed.");
@@ -127,7 +140,16 @@ function statePlan(
     clearOutbox,
     syncState: {
       key: "google",
-      status: action === "conflict" ? "conflict" : action === "no_op" ? "synced" : action === "push_local" ? "waiting_to_sync" : "synced",
+      status:
+        action === "read_only_recovery"
+          ? "read_only_recovery"
+          : action === "conflict"
+            ? "conflict"
+            : action === "no_op"
+              ? "synced"
+              : action === "push_local"
+                ? "waiting_to_sync"
+                : "synced",
       remoteRevision: action === "push_local" ? nextRemoteRevision : remoteRevision,
       lastSyncedAt: action === "conflict" ? undefined : new Date().toISOString(),
       message

@@ -1,12 +1,19 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Plus } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
-import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
+import { addDays, formatDisplayDate, isOnOrAfter, isOnOrBefore } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
-import { createRecordMeta } from "../../domain/records";
+import { createRecordMeta, touchRecord } from "../../domain/records";
 import type { PlanInstance, RecurringRule, Subscription } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
+
+interface SubscriptionPriceHistoryEntry {
+  changedAt: string;
+  effectiveDate: string;
+  previousAmountMinor: number;
+  nextAmountMinor: number;
+}
 
 export function SubscriptionsPage() {
   const { snapshot, asOfDate, loading, error, saveRecords } = useBluehourData();
@@ -33,9 +40,50 @@ export function SubscriptionsPage() {
     );
   }
 
-  const rulesById = new Map(snapshot.recurringRules.map((rule) => [rule.id, rule]));
-  const accounts = snapshot.accounts.filter(isActive);
-  const categories = snapshot.categories.filter((category) => isActive(category) && category.active);
+  const loadedSnapshot = snapshot;
+  const rulesById = new Map(loadedSnapshot.recurringRules.map((rule) => [rule.id, rule]));
+  const accounts = loadedSnapshot.accounts.filter(isActive);
+  const categories = loadedSnapshot.categories.filter((category) => isActive(category) && category.active);
+
+  async function updateSubscriptionPrice(subscription: Subscription, rule: RecurringRule, nextAmountMinor: number) {
+    const now = new Date().toISOString();
+    const history = parsePriceHistory(subscription);
+    const updatedRule: RecurringRule = {
+      ...touchRecord(rule),
+      amountMinor: nextAmountMinor
+    };
+    const updatedSubscription: Subscription = {
+      ...touchRecord(subscription),
+      priceHistoryJson: JSON.stringify([
+        ...history,
+        {
+          changedAt: now,
+          effectiveDate: asOfDate,
+          previousAmountMinor: rule.amountMinor,
+          nextAmountMinor
+        } satisfies SubscriptionPriceHistoryEntry
+      ])
+    };
+    const futurePlans = loadedSnapshot.planInstances
+      .filter(
+        (plan) =>
+          isActive(plan) &&
+          plan.recurringRuleId === rule.id &&
+          plan.status === "scheduled" &&
+          isOnOrAfter(plan.expectedDate, asOfDate)
+      )
+      .map((plan) => ({ ...touchRecord(plan), expectedAmountMinor: nextAmountMinor }));
+
+    await saveRecords(
+      [
+        { storeName: "recurringRules", record: updatedRule },
+        { storeName: "subscriptions", record: updatedSubscription },
+        ...futurePlans.map((record) => ({ storeName: "planInstances" as const, record }))
+      ],
+      "subscription price update"
+    );
+    setMessage(`Subscription price updated. ${futurePlans.length} future plan${futurePlans.length === 1 ? "" : "s"} updated after confirmation.`);
+  }
 
   return (
     <>
@@ -72,7 +120,7 @@ export function SubscriptionsPage() {
             <h2>Upcoming subscription payments</h2>
           </div>
         </div>
-        <div className="data-table">
+        <div className="data-table subscription-table">
           <div className="data-row header">
             <span>Provider</span>
             <span>Frequency</span>
@@ -80,6 +128,7 @@ export function SubscriptionsPage() {
             <span>Annual renewal</span>
             <span>Amount</span>
             <span>Status</span>
+            <span>Action</span>
           </div>
           {subscriptions.map((subscription) => {
             const rule = rulesById.get(subscription.recurringRuleId);
@@ -98,6 +147,17 @@ export function SubscriptionsPage() {
                 <span>{subscription.annualRenewalDate ? formatDisplayDate(subscription.annualRenewalDate) : "Not set"}</span>
                 <Amount value={rule?.amountMinor ?? 0} />
                 <span>{paymentSoon ? "Due within seven days" : annualSoon ? "Renewal within 30 days" : "Scheduled"}</span>
+                <span>
+                  {rule ? (
+                    <SubscriptionPriceUpdateForm
+                      currentAmountMinor={rule.amountMinor}
+                      historyCount={parsePriceHistory(subscription).length}
+                      onUpdate={(nextAmountMinor) => updateSubscriptionPrice(subscription, rule, nextAmountMinor)}
+                    />
+                  ) : (
+                    "Missing rule"
+                  )}
+                </span>
               </div>
             );
           })}
@@ -105,6 +165,62 @@ export function SubscriptionsPage() {
       </section>
     </>
   );
+}
+
+function SubscriptionPriceUpdateForm({
+  currentAmountMinor,
+  historyCount,
+  onUpdate
+}: {
+  currentAmountMinor: number;
+  historyCount: number;
+  onUpdate: (amountMinor: number) => Promise<void>;
+}) {
+  const [amount, setAmount] = useState((currentAmountMinor / 100).toFixed(2));
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      if (!confirmed) {
+        throw new Error("Confirm before updating future plans");
+      }
+      await onUpdate(parseMoneyInput(amount));
+      setConfirmed(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update price");
+    }
+  }
+
+  return (
+    <form className="inline-form price-update-form" onSubmit={submit}>
+      <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" aria-label="New subscription price" />
+      <label className="checkbox-label compact">
+        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+        Future plans
+      </label>
+      <button className="secondary-action" type="submit">
+        Update
+      </button>
+      <small>{historyCount} prior price change{historyCount === 1 ? "" : "s"}</small>
+      {error ? <small className="form-error">{error}</small> : null}
+    </form>
+  );
+}
+
+function parsePriceHistory(subscription: Subscription): SubscriptionPriceHistoryEntry[] {
+  if (!subscription.priceHistoryJson) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(subscription.priceHistoryJson) as SubscriptionPriceHistoryEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function SubscriptionForm({

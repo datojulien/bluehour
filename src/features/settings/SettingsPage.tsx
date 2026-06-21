@@ -3,7 +3,7 @@ import { Download, KeyRound, Plus, ShieldCheck, Upload } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { decryptBackup, encryptBackup, type EncryptedBackupEnvelope } from "../../data/backup/encryptedBackup";
 import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
-import { createBluehourSpreadsheet, createConnectionDescriptor, extractSpreadsheetId } from "../../data/google/googleSheetsAdapter";
+import { createBluehourSpreadsheet, createConnectionDescriptor, ensureBluehourSheetSchema, extractSpreadsheetId } from "../../data/google/googleSheetsAdapter";
 import { pushSnapshotToGoogleSheet, readSnapshotFromGoogleSheet } from "../../data/google/sheetSerialization";
 import type { LocalMutation, MutableStoreName } from "../../data/local-db/localDb";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
@@ -17,7 +17,7 @@ import { isActive } from "../../domain/types";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 export function SettingsPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, applyRemoteSync, markSynced, isDemo, canUseGoogleSync } =
+  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords, restoreProfileSnapshot, applyRemoteSync, markSynced, isDemo, canUseGoogleSync } =
     useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
@@ -72,24 +72,37 @@ export function SettingsPage() {
         />
       </section>
 
-      <StartCycleSetupPanel
-        date={asOfDate}
-        accounts={snapshot.accounts.filter(isActive)}
-        incomeCategoryId={snapshot.categories.find((category) => category.name === "Income")?.id ?? "cat-income"}
-        onSave={async (records) => {
-          await saveRecords(
-            [
-              { storeName: "balanceSnapshots", record: records.openingSnapshot },
-              { storeName: "transactions", record: records.salaryTransaction },
-              { storeName: "transactionLegs", record: records.salaryLeg },
-              { storeName: "transactionSplits", record: records.salarySplit },
-              { storeName: "budgetCycles", record: records.cycle }
-            ],
-            "first salary cycle"
-          );
-          setMessage("Salary cycle started from the actual salary arrival.");
-        }}
-      />
+      {snapshot.budgetCycles.some((cycle) => cycle.status === "open") ? (
+        <section className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Onboarding</p>
+              <h2>Salary cycle already started</h2>
+            </div>
+          </div>
+          <p>The live profile already has an open salary cycle. Use Review to close it when the next main salary arrives.</p>
+        </section>
+      ) : (
+        <StartCycleSetupPanel
+          date={asOfDate}
+          accounts={snapshot.accounts.filter(isActive)}
+          incomeCategoryId={snapshot.categories.find((category) => category.name === "Income")?.id ?? "cat-income"}
+          existingCycles={snapshot.budgetCycles}
+          onSave={async (records) => {
+            await saveRecords(
+              [
+                { storeName: "balanceSnapshots", record: records.openingSnapshot },
+                { storeName: "transactions", record: records.salaryTransaction },
+                { storeName: "transactionLegs", record: records.salaryLeg },
+                { storeName: "transactionSplits", record: records.salarySplit },
+                { storeName: "budgetCycles", record: records.cycle }
+              ],
+              "first salary cycle"
+            );
+            setMessage("Salary cycle started from the actual salary arrival.");
+          }}
+        />
+      )}
 
       <ConflictReviewPanel
         conflicts={snapshot.conflicts.filter((conflict) => conflict.status === "open")}
@@ -127,9 +140,10 @@ export function SettingsPage() {
         <BackupPanel
           snapshot={snapshot}
           isDemo={isDemo}
+          profileLabel={isDemo ? "fictional demonstration profile" : "live profile"}
           onRestore={async (restored) => {
-            await saveRecords(snapshotToMutations(restored), "backup restore");
-            setMessage("Encrypted backup restored into local IndexedDB.");
+            await restoreProfileSnapshot(restored);
+            setMessage("Encrypted backup atomically replaced the current local profile.");
           }}
         />
         <CsvExportPanel snapshot={snapshot} isDemo={isDemo} />
@@ -172,11 +186,13 @@ function StartCycleSetupPanel({
   date,
   accounts,
   incomeCategoryId,
+  existingCycles,
   onSave
 }: {
   date: string;
   accounts: Account[];
   incomeCategoryId: string;
+  existingCycles: Parameters<typeof startFirstSalaryCycle>[0]["existingCycles"];
   onSave: (records: ReturnType<typeof startFirstSalaryCycle>) => Promise<void>;
 }) {
   const [salaryDate, setSalaryDate] = useState(date);
@@ -195,7 +211,8 @@ function StartCycleSetupPanel({
           salaryDepositText: salaryDeposit,
           currentBalanceText: currentBalance,
           destinationAccountId,
-          incomeCategoryId
+          incomeCategoryId,
+          existingCycles
         })
       );
       setSalaryDeposit("");
@@ -431,6 +448,7 @@ function GoogleSettings({
         throw new Error("Save or enter a spreadsheet ID first");
       }
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+      await ensureBluehourSheetSchema(spreadsheetId, token);
       await pushSnapshotToGoogleSheet(spreadsheetId, snapshot, token);
       await onMarkSynced({
         key: "google",
@@ -470,6 +488,7 @@ function GoogleSettings({
       const syncState = { ...plan.syncState, spreadsheetId };
 
       if (plan.action === "push_local") {
+        await ensureBluehourSheetSchema(spreadsheetId, token);
         await pushSnapshotToGoogleSheet(spreadsheetId, snapshot, token, fetch, plan.nextRemoteRevision);
         await onMarkSynced({
           ...syncState,
@@ -501,6 +520,31 @@ function GoogleSettings({
     downloadJson("bluehour-connection-descriptor.json", descriptor);
   }
 
+  async function prepareSheetSchema() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      if (!canUseGoogleSync) {
+        throw new Error("Demonstration data cannot prepare a Google Sheet");
+      }
+      if (!GOOGLE_CLIENT_ID) {
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before preparing Google Sheets");
+      }
+      const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
+      if (!spreadsheetId) {
+        throw new Error("Save or enter a spreadsheet ID first");
+      }
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+      const missing = await ensureBluehourSheetSchema(spreadsheetId, token);
+      setStatus(missing.length === 0 ? "Google Sheet already has all Bluehour v2 tabs." : `Added ${missing.length} missing Bluehour v2 tabs.`);
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : "Google schema preparation failed");
+    } finally {
+      clearInMemoryGoogleAccessToken();
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="dashboard-band">
       <div className="band-header">
@@ -527,6 +571,9 @@ function GoogleSettings({
           </button>
           <button className="primary-action" type="button" onClick={() => void createSheet()} disabled={busy || !canUseGoogleSync}>
             Create Sheet
+          </button>
+          <button className="secondary-action" type="button" onClick={() => void prepareSheetSchema()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
+            Prepare v2 tabs
           </button>
           <button className="primary-action" type="button" onClick={() => void pushToSheet()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
             Push local snapshot
@@ -593,14 +640,17 @@ function ConflictReviewPanel({
 function BackupPanel({
   snapshot,
   isDemo,
+  profileLabel,
   onRestore
 }: {
   snapshot: BluehourSnapshot;
   isDemo: boolean;
+  profileLabel: string;
   onRestore: (snapshot: BluehourSnapshot) => Promise<void>;
 }) {
   const [passphrase, setPassphrase] = useState("");
   const [restoreText, setRestoreText] = useState("");
+  const [restoreConfirmed, setRestoreConfirmed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function exportBackup() {
@@ -615,6 +665,9 @@ function BackupPanel({
 
   async function restoreBackup() {
     try {
+      if (!restoreConfirmed) {
+        throw new Error("Confirm that restore should replace the current profile");
+      }
       const restored = await decryptBackup(JSON.parse(restoreText) as EncryptedBackupEnvelope, passphrase);
       await onRestore(restored);
       setMessage("Backup decrypted and restored.");
@@ -646,7 +699,12 @@ function BackupPanel({
           Restore envelope
           <textarea rows={4} value={restoreText} onChange={(event) => setRestoreText(event.target.value)} />
         </label>
-        <button className="secondary-action" type="button" onClick={() => void restoreBackup()}>
+        <p className="form-note danger-text">Restore replaces the current {profileLabel} after validation. It is not merged with existing local data.</p>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={restoreConfirmed} onChange={(event) => setRestoreConfirmed(event.target.checked)} />
+          Replace this {profileLabel}
+        </label>
+        <button className="secondary-action" type="button" onClick={() => void restoreBackup()} disabled={!restoreConfirmed}>
           <Upload size={16} aria-hidden="true" />
           Restore backup
         </button>
@@ -686,29 +744,6 @@ function CsvExportPanel({ snapshot, isDemo }: { snapshot: BluehourSnapshot; isDe
       </div>
     </section>
   );
-}
-
-function snapshotToMutations(snapshot: BluehourSnapshot): LocalMutation[] {
-  return [
-    ...snapshot.accounts.map((record) => ({ storeName: "accounts" as const, record })),
-    ...snapshot.balanceSnapshots.map((record) => ({ storeName: "balanceSnapshots" as const, record })),
-    ...snapshot.transactions.map((record) => ({ storeName: "transactions" as const, record })),
-    ...snapshot.transactionLegs.map((record) => ({ storeName: "transactionLegs" as const, record })),
-    ...snapshot.transactionSplits.map((record) => ({ storeName: "transactionSplits" as const, record })),
-    ...snapshot.categories.map((record) => ({ storeName: "categories" as const, record })),
-    ...snapshot.budgetCycles.map((record) => ({ storeName: "budgetCycles" as const, record })),
-    ...snapshot.budgetAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record })),
-    ...snapshot.budgetTransfers.map((record) => ({ storeName: "budgetTransfers" as const, record })),
-    ...snapshot.recurringRules.map((record) => ({ storeName: "recurringRules" as const, record })),
-    ...snapshot.planInstances.map((record) => ({ storeName: "planInstances" as const, record })),
-    ...snapshot.subscriptions.map((record) => ({ storeName: "subscriptions" as const, record })),
-    ...snapshot.categorisationRules.map((record) => ({ storeName: "categorisationRules" as const, record })),
-    ...snapshot.importProfiles.map((record) => ({ storeName: "importProfiles" as const, record })),
-    ...snapshot.importBatches.map((record) => ({ storeName: "importBatches" as const, record })),
-    ...snapshot.reconciliations.map((record) => ({ storeName: "reconciliations" as const, record })),
-    ...snapshot.reviewSessions.map((record) => ({ storeName: "reviewSessions" as const, record })),
-    ...snapshot.settings.map((record) => ({ storeName: "settings" as const, record }))
-  ];
 }
 
 function prettyJson(json: string): string {

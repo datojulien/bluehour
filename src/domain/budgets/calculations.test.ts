@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBudgetTransferDelta, calculateCategoryAllocation, calculateRemainingAllocation } from "./calculations";
+import { assertBudgetTransferSourceAvailable, calculateBudgetTransferDelta, calculateCategoryAllocation, calculateRemainingAllocation } from "./calculations";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
 
 describe("budget calculations", () => {
@@ -15,5 +15,11 @@ describe("budget calculations", () => {
 
   it("does not let remaining allocation go below zero", () => {
     expect(calculateRemainingAllocation(5_000, 6_500)).toBe(0);
+  });
+
+  it("validates transfer source availability", () => {
+    expect(() => assertBudgetTransferSourceAvailable(10_000, 9_000)).not.toThrow();
+    expect(() => assertBudgetTransferSourceAvailable(10_000, 11_000)).toThrow(/not have enough/);
+    expect(() => assertBudgetTransferSourceAvailable(10_000, 0)).toThrow(/greater than/);
   });
 });

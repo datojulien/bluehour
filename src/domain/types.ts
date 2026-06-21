@@ -167,6 +167,7 @@ export interface Subscription extends RecordMeta {
   cancellationDeadline?: IsoDate;
   essential: boolean;
   notes?: string;
+  priceHistoryJson?: string;
 }
 
 export interface CategorisationRule extends RecordMeta {
@@ -243,7 +244,7 @@ export interface RecurringRule extends RecordMeta {
 }
 
 export interface AppSettings extends RecordMeta {
-  key: "preferences" | "googleConnection" | "backupStatus";
+  key: "preferences" | "googleConnection" | "backupStatus" | "onboardingBudgetTemplate";
   valueJson: string;
 }
 

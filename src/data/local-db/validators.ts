@@ -124,7 +124,8 @@ export const subscriptionSchema = metaSchema.extend({
   annualRenewalDate: isoDate.optional(),
   cancellationDeadline: isoDate.optional(),
   essential: z.boolean(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  priceHistoryJson: z.string().optional()
 });
 
 export const categorisationRuleSchema = metaSchema.extend({
@@ -201,7 +202,7 @@ export const recurringRuleSchema = metaSchema.extend({
 });
 
 export const appSettingsSchema = metaSchema.extend({
-  key: z.enum(["preferences", "googleConnection", "backupStatus"]),
+  key: z.enum(["preferences", "googleConnection", "backupStatus", "onboardingBudgetTemplate"]),
   valueJson: z.string()
 });
 
@@ -242,3 +243,24 @@ export const syncStateSchema = z.object({
   lastSyncedAt: z.string().optional(),
   message: z.string().optional()
 });
+
+export const syncedStoreSchemas = {
+  accounts: accountSchema,
+  balanceSnapshots: balanceSnapshotSchema,
+  transactions: transactionSchema,
+  transactionLegs: transactionLegSchema,
+  transactionSplits: transactionSplitSchema,
+  categories: categorySchema,
+  budgetCycles: budgetCycleSchema,
+  budgetAllocations: budgetAllocationSchema,
+  budgetTransfers: budgetTransferSchema,
+  recurringRules: recurringRuleSchema,
+  planInstances: planInstanceSchema,
+  subscriptions: subscriptionSchema,
+  categorisationRules: categorisationRuleSchema,
+  importProfiles: importProfileSchema,
+  importBatches: importBatchSchema,
+  reconciliations: reconciliationSchema,
+  reviewSessions: reviewSessionSchema,
+  settings: appSettingsSchema
+} as const;

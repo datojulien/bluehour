@@ -344,7 +344,7 @@ export async function loadLiveSnapshot(): Promise<BluehourSnapshot> {
   return loadProfileSnapshot("live");
 }
 
-function validateSnapshot(snapshot: BluehourSnapshot): void {
+export function validateSnapshot(snapshot: BluehourSnapshot): void {
   snapshot.accounts.forEach((record) => accountSchema.parse(record));
   snapshot.balanceSnapshots.forEach((record) => balanceSnapshotSchema.parse(record));
   snapshot.transactions.forEach((record) => transactionSchema.parse(record));
@@ -366,6 +366,40 @@ function validateSnapshot(snapshot: BluehourSnapshot): void {
   snapshot.outboxOperations.forEach((record) => outboxOperationSchema.parse(record));
   snapshot.conflicts.forEach((record) => conflictRecordSchema.parse(record));
   snapshot.syncState.forEach((record) => syncStateSchema.parse(record));
+}
+
+export async function replaceProfileSnapshot(profileId: ProfileId, snapshot: BluehourSnapshot): Promise<void> {
+  validateSnapshot(snapshot);
+  const db = await openBluehourDb(profileId);
+  const tx = db.transaction([...MUTABLE_STORES], "readwrite");
+
+  for (const store of MUTABLE_STORES) {
+    await tx.objectStore(store).clear();
+  }
+
+  await putAll(tx.objectStore("accounts"), snapshot.accounts);
+  await putAll(tx.objectStore("balanceSnapshots"), snapshot.balanceSnapshots);
+  await putAll(tx.objectStore("transactions"), snapshot.transactions);
+  await putAll(tx.objectStore("transactionLegs"), snapshot.transactionLegs);
+  await putAll(tx.objectStore("transactionSplits"), snapshot.transactionSplits);
+  await putAll(tx.objectStore("categories"), snapshot.categories);
+  await putAll(tx.objectStore("budgetCycles"), snapshot.budgetCycles);
+  await putAll(tx.objectStore("budgetAllocations"), snapshot.budgetAllocations);
+  await putAll(tx.objectStore("budgetTransfers"), snapshot.budgetTransfers);
+  await putAll(tx.objectStore("recurringRules"), snapshot.recurringRules);
+  await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
+  await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
+  await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
+  await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
+  await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
+  await putAll(tx.objectStore("reconciliations"), snapshot.reconciliations);
+  await putAll(tx.objectStore("reviewSessions"), snapshot.reviewSessions);
+  await putAll(tx.objectStore("settings"), snapshot.settings);
+  await putAll(tx.objectStore("outboxOperations"), snapshot.outboxOperations);
+  await putAll(tx.objectStore("conflicts"), snapshot.conflicts);
+  await putAll(tx.objectStore("syncState"), snapshot.syncState);
+  await tx.done;
+  db.close();
 }
 
 async function putAll<T>(store: { put(value: T): Promise<IDBValidKey> }, values: readonly T[]): Promise<void> {

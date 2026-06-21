@@ -8,6 +8,7 @@ import {
   initializeLiveProfile,
   loadProfileSnapshot,
   putLocalRecords,
+  replaceProfileSnapshot,
   resetDemoProfile,
   type LocalMutation,
   type MutableRecord,
@@ -40,6 +41,7 @@ interface BluehourDataContextValue {
   saveRecord: (storeName: MutableStoreName, record: MutableRecord, label?: string) => Promise<void>;
   saveRecords: (mutations: LocalMutation[], label?: string) => Promise<void>;
   archiveRecord: (storeName: Parameters<typeof archiveLocalRecord>[1], recordId: string) => Promise<void>;
+  restoreProfileSnapshot: (snapshot: BluehourSnapshot) => Promise<void>;
   applyRemoteSync: (args: {
     mutations: LocalMutation[];
     conflicts: ConflictRecord[];
@@ -146,7 +148,24 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     return shellState.activeProfile;
   }
 
+  function currentApplicationState(): ApplicationState {
+    const syncState = snapshot?.syncState.find((state) => state.key === "google");
+    return deriveApplicationState(shellState?.applicationState ?? "welcome", syncState);
+  }
+
+  function assertWritable(label: string) {
+    const state = currentApplicationState();
+    if (state === "read_only_recovery") {
+      throw new Error("Bluehour is in read-only recovery. Exports remain available, but writes are paused until recovery is complete.");
+    }
+
+    if (state === "sync_conflict" && label !== "conflict resolution") {
+      throw new Error("Resolve the Google sync conflict before making new local changes.");
+    }
+  }
+
   async function saveRecords(mutations: LocalMutation[], label = "change") {
+    assertWritable(label);
     const profileId = requireProfile();
     await putLocalRecords(profileId, mutations, label);
     setSnapshot(await loadProfileSnapshot(profileId));
@@ -157,6 +176,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function saveTransaction(draft: TransactionDraft) {
+    assertWritable("transaction");
     const profileId = requireProfile();
     if (!snapshot) {
       throw new Error("Bluehour data has not loaded yet");
@@ -182,8 +202,16 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function archiveRecord(storeName: Parameters<typeof archiveLocalRecord>[1], recordId: string) {
+    assertWritable("archive");
     const profileId = requireProfile();
     await archiveLocalRecord(profileId, storeName, recordId);
+    setSnapshot(await loadProfileSnapshot(profileId));
+  }
+
+  async function restoreProfileData(restoredSnapshot: BluehourSnapshot) {
+    assertWritable("backup restore");
+    const profileId = requireProfile();
+    await replaceProfileSnapshot(profileId, restoredSnapshot);
     setSnapshot(await loadProfileSnapshot(profileId));
   }
 
@@ -194,6 +222,9 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     clearOutbox: boolean;
   }) {
     const profileId = requireProfile();
+    if (currentApplicationState() === "read_only_recovery") {
+      throw new Error("Bluehour is in read-only recovery. Google sync writes are paused.");
+    }
     if (profileId === "demo") {
       throw new Error("Demonstration data cannot be pushed to or pulled from Google Sheets");
     }
@@ -245,6 +276,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     saveRecord,
     saveRecords,
     archiveRecord,
+    restoreProfileSnapshot: restoreProfileData,
     applyRemoteSync,
     markSynced
   };

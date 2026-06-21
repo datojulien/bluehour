@@ -14,7 +14,7 @@ import {
   Search,
   Settings
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useBluehourData } from "../providers/BluehourDataProvider";
 import { usePrivacy } from "../providers/PrivacyProvider";
@@ -39,6 +39,7 @@ export function AppShell() {
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const firstCommandRef = useRef<HTMLButtonElement>(null);
   const syncState = snapshot?.syncState.find((state) => state.key === "google");
   const syncLabel = syncState?.message ?? syncState?.status?.replaceAll("_", " ") ?? "Saved locally";
 
@@ -73,6 +74,12 @@ export function AppShell() {
     window.addEventListener("bluehour:update-available", handleUpdateAvailable);
     return () => window.removeEventListener("bluehour:update-available", handleUpdateAvailable);
   }, []);
+
+  useEffect(() => {
+    if (commandMenuOpen) {
+      firstCommandRef.current?.focus();
+    }
+  }, [commandMenuOpen]);
 
   return (
     <div className="app-shell">
@@ -198,13 +205,14 @@ export function AppShell() {
 
       {commandMenuOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setCommandMenuOpen(false)}>
-          <section className="command-menu" aria-label="Command menu" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="command-menu" role="dialog" aria-modal="true" aria-label="Command menu" onMouseDown={(event) => event.stopPropagation()}>
             <div className="command-header">
               <p className="eyebrow">Command menu</p>
               <h2>Go to</h2>
             </div>
             <div className="command-list">
               <button
+                ref={firstCommandRef}
                 type="button"
                 onClick={() => {
                   openTransactionComposer();

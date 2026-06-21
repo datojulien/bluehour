@@ -31,7 +31,13 @@ npm ci
 npm run dev
 ```
 
-Vite prints a local URL, usually `http://localhost:5173/`.
+Vite serves the local app at:
+
+```text
+http://127.0.0.1:5173/
+```
+
+The dev server uses a strict port because Google OAuth origins are exact. If port `5173` is already in use, stop the other Vite process instead of letting the app move to a different port.
 
 Optional Google OAuth config for local testing:
 
@@ -45,6 +51,8 @@ Then set:
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 ```
 
+Restart `npm run dev` after changing `.env`; Vite reads environment variables at startup.
+
 ## Checks
 
 ```bash
@@ -55,6 +63,8 @@ npm run typecheck
 npm run build
 npm run test:e2e
 ```
+
+The Playwright suite includes the 25 production-readiness scenarios and automated axe accessibility checks.
 
 Playwright browsers can be installed with:
 
@@ -84,7 +94,25 @@ It is a public browser OAuth client ID, not a secret.
 
 ## Google Cloud OAuth Setup
 
-Create an OAuth client for a web application in Google Cloud and add the deployed GitHub Pages origin, for example:
+Use the same Google Cloud project for every step below:
+
+1. Enable the **Google Sheets API** in APIs & Services.
+2. Configure the OAuth consent screen.
+3. Create an OAuth client for a web application.
+
+A `Google Sheets create failed with 403` error usually means the Sheets API is not enabled for the project that owns `VITE_GOOGLE_CLIENT_ID`, or the OAuth consent/scope setup is incomplete.
+
+For local development, add this exact authorized JavaScript origin:
+
+```text
+http://127.0.0.1:5173
+```
+
+If you deliberately use localhost instead, add it separately:
+
+```text
+http://localhost:5173
+```
 
 ```text
 https://datojulien.github.io
@@ -116,7 +144,18 @@ New pushes use an active/inactive slot protocol:
 - `A_...` data tabs
 - `B_...` data tabs
 
-Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read for migration, but the non-destructive migration UI remains incomplete.
+Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read as a migration source.
+
+Settings also includes a schema preparation action for existing Sheets; it adds any missing v2 tabs before push/sync without deleting data. Legacy v1 single-slot Sheet reading is covered with mocked tests, but a real legacy Sheet migration source still needs manual Google-account verification before `1.0.0`.
+
+Manual Google verification before `1.0.0`:
+
+1. Deploy with the GitHub Pages origin authorised in Google Cloud.
+2. Create a private Bluehour Sheet from the live profile.
+3. Prepare v2 tabs on an existing Sheet.
+4. Push and sync live data using the app UI.
+5. Reconnect after clearing the in-memory token.
+6. Read a legacy v1 Sheet as a migration source without mutating it.
 
 ## Offline Behaviour
 
@@ -126,7 +165,7 @@ The service worker uses network-first navigation and versioned static-asset cach
 
 ## Backup And Restore
 
-Settings can create encrypted JSON backups with Web Crypto. The passphrase is never stored. Restore support exists, but full staged atomic restore with profile-type warnings remains a production-readiness item.
+Settings can create encrypted JSON backups with Web Crypto. The passphrase is never stored. Restore validates the backup, warns when profile types differ, and replaces the current local profile atomically after explicit confirmation.
 
 ## Privacy Model
 
@@ -138,7 +177,7 @@ Settings can create encrypted JSON backups with Web Crypto. The passphrase is ne
 
 ## Limitations
 
-Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The largest are the full CSV mapping wizard, complete plan-confirmation variance UI, cross-salary virtual-cycle forecasting, complete recovery flows, and real Google OAuth/Sheet verification.
+Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The only remaining release blocker is external Google OAuth/Sheet verification with a real account and deployed origin.
 
 ## Recovery
 

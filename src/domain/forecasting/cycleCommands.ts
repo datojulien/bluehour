@@ -19,6 +19,7 @@ export interface StartFirstCycleInput {
   currentBalanceText: string;
   destinationAccountId: string;
   incomeCategoryId: string;
+  existingCycles?: readonly BudgetCycle[];
 }
 
 export interface StartFirstCycleResult {
@@ -30,6 +31,10 @@ export interface StartFirstCycleResult {
 }
 
 export function startFirstSalaryCycle(input: StartFirstCycleInput): StartFirstCycleResult {
+  if (input.existingCycles?.some((cycle) => cycle.status === "open")) {
+    throw new Error("An open salary cycle already exists");
+  }
+
   const salaryDepositMinor = parseMoneyInput(input.salaryDepositText);
   const currentBalanceMinor = parseMoneyInput(input.currentBalanceText);
   if (salaryDepositMinor <= 0) {
@@ -96,6 +101,7 @@ export interface CloseSalaryCycleInput {
   incomeCategoryId: string;
   categories: readonly Category[];
   allocations: readonly BudgetAllocation[];
+  reconciliationComplete?: boolean;
   skipReconciliationNote?: string;
 }
 
@@ -109,6 +115,14 @@ export interface CloseSalaryCycleResult {
 }
 
 export function closeSalaryCycleWithActualSalary(input: CloseSalaryCycleInput): CloseSalaryCycleResult {
+  if (input.currentCycle.status !== "open") {
+    throw new Error("Only an open salary cycle can be closed");
+  }
+
+  if (!input.reconciliationComplete && !input.skipReconciliationNote?.trim()) {
+    throw new Error("Cycle close requires completed reconciliation or an explicit skip note");
+  }
+
   const salaryDepositMinor = parseMoneyInput(input.salaryDepositText);
   if (salaryDepositMinor <= 0) {
     throw new Error("Salary deposit must be greater than RM0.00");

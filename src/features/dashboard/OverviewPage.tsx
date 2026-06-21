@@ -8,7 +8,7 @@ import { isActive, type BluehourSnapshot, type IsoDate } from "../../domain/type
 import { Amount } from "../../ui/Amount";
 import { BreakdownDrawer } from "./BreakdownDrawer";
 import { buildBudgetRows } from "./budgetRows";
-import { buildDashboardModel } from "./dashboardModel";
+import { buildDailyTimeline, buildDashboardModel } from "./dashboardModel";
 
 const periodOrder: SafeToSpendPeriod[] = ["untilSalary", "thisMonth", "next30Days"];
 
@@ -39,6 +39,7 @@ export function OverviewPage() {
   const budgetRows = buildBudgetRows(snapshot, result);
 
   const upcoming = projected.breakdown.committedPlans.slice(0, 4);
+  const timeline = buildDailyTimeline(model.periods.next30Days.projected, 30);
   const alerts = buildDashboardAlerts(snapshot, result, budgetRows, asOfDate);
   const whatChanged = buildWhatChanged(snapshot, result, budgetRows);
 
@@ -124,11 +125,11 @@ export function OverviewPage() {
           </div>
         </div>
         <div className="timeline">
-          {projected.forecast.slice(0, 7).map((point) => (
-            <div className="timeline-point" key={`${point.date}-${point.label}`}>
+          {timeline.map((point) => (
+            <div className={`timeline-point${point.isLowest ? " timeline-lowest" : ""}`} key={point.date}>
               <span className="timeline-dot" aria-hidden="true" />
               <div>
-                <strong>{point.label ?? "Plan"}</strong>
+                <strong>{point.labels.length > 0 ? point.labels.join(", ") : "Projected day"}</strong>
                 <span>{formatDisplayDate(point.date)}</span>
               </div>
               <Amount value={point.balanceMinor} />
@@ -154,7 +155,14 @@ export function OverviewPage() {
                     <Amount value={row.remaining} /> remaining
                   </span>
                 </div>
-                <div className="progress-track" aria-label={`${row.name} ${row.percentage}% used`}>
+                <div
+                  className="progress-track"
+                  role="progressbar"
+                  aria-label={`${row.name} ${row.percentage}% used`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={row.percentage}
+                >
                   <span style={{ width: `${row.percentage}%` }} />
                 </div>
               </div>

@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { ArrowRightLeft, Save } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
-import { calculateCategoryAllocation } from "../../domain/budgets/calculations";
+import { assertBudgetTransferSourceAvailable, calculateCategoryAllocation } from "../../domain/budgets/calculations";
 import { formatDisplayDate } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
@@ -81,6 +81,7 @@ export function BudgetsPage() {
       <BudgetTransferForm
         cycleId={cycle.id}
         categories={snapshot.categories.filter((category) => isActive(category) && category.nature === "discretionary")}
+        sourceAvailability={Object.fromEntries(rows.map((row) => [row.category.id, Math.max(0, row.remaining)]))}
         onSave={async (transfer) => {
           await saveRecord("budgetTransfers", transfer, "budget transfer");
           setMessage("Budget transfer saved. No account transaction was created.");
@@ -94,8 +95,8 @@ export function BudgetsPage() {
             <h2>Cycle progress</h2>
           </div>
         </div>
-        <div className="data-table" role="table" aria-label="Budget allocations">
-          <div className="data-row header" role="row">
+        <div className="data-table" role="region" aria-label="Budget allocations">
+          <div className="data-row header">
             <span>Category</span>
             <span>Mode</span>
             <span>Allocated</span>
@@ -130,7 +131,7 @@ function BudgetRow({
   const state = row.remaining < 0 ? "overspent" : row.percentage >= 80 ? "near limit" : "on track";
 
   return (
-    <div className={`data-row budget-state-${state.replace(" ", "-")}`} role="row">
+    <div className={`data-row budget-state-${state.replace(" ", "-")}`}>
       <span>
         <strong>{row.category.name}</strong>
         <small>{state}</small>
@@ -155,10 +156,12 @@ function BudgetRow({
 function BudgetTransferForm({
   cycleId,
   categories,
+  sourceAvailability,
   onSave
 }: {
   cycleId: string;
   categories: Category[];
+  sourceAvailability: Record<string, number>;
   onSave: (transfer: BudgetTransfer) => Promise<void>;
 }) {
   const [fromCategoryId, setFromCategoryId] = useState(categories[0]?.id ?? "");
@@ -174,12 +177,14 @@ function BudgetTransferForm({
       if (fromCategoryId === toCategoryId) {
         throw new Error("Choose two different categories");
       }
+      const amountMinor = parseMoneyInput(amount);
+      assertBudgetTransferSourceAvailable(sourceAvailability[fromCategoryId] ?? 0, amountMinor);
       await onSave({
         ...createRecordMeta("transfer"),
         budgetCycleId: cycleId,
         fromCategoryId,
         toCategoryId,
-        amountMinor: parseMoneyInput(amount),
+        amountMinor,
         occurredOn: new Date().toISOString().slice(0, 10) as BudgetTransfer["occurredOn"],
         note: note || undefined
       });
@@ -204,7 +209,7 @@ function BudgetTransferForm({
           <select value={fromCategoryId} onChange={(event) => setFromCategoryId(event.target.value)}>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {category.name} · RM{((sourceAvailability[category.id] ?? 0) / 100).toFixed(2)} available
               </option>
             ))}
           </select>

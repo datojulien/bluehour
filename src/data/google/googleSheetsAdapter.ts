@@ -34,6 +34,15 @@ export interface ConnectionDescriptor {
   schemaVersion: number;
 }
 
+interface GoogleApiErrorBody {
+  error?: {
+    message?: unknown;
+    status?: unknown;
+  } | string;
+  error_description?: unknown;
+  message?: unknown;
+}
+
 export function createConnectionDescriptor(spreadsheetId: string): ConnectionDescriptor {
   return {
     spreadsheetId,
@@ -67,7 +76,7 @@ export async function createBluehourSpreadsheet(accessToken: string, fetcher: ty
   });
 
   if (!response.ok) {
-    throw new Error(`Google Sheets create failed with ${response.status}`);
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets create"));
   }
 
   const body = (await response.json()) as { spreadsheetId?: string };
@@ -76,6 +85,64 @@ export async function createBluehourSpreadsheet(accessToken: string, fetcher: ty
   }
 
   return body.spreadsheetId;
+}
+
+export async function readGoogleSpreadsheetTabTitles(
+  spreadsheetId: string,
+  accessToken: string,
+  fetcher: typeof fetch = fetch
+): Promise<string[]> {
+  const response = await fetcher(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets metadata read"));
+  }
+
+  const body = (await response.json()) as { sheets?: Array<{ properties?: { title?: string } }> };
+  return (body.sheets ?? []).map((sheet) => sheet.properties?.title).filter((title): title is string => Boolean(title));
+}
+
+export async function ensureBluehourSheetSchema(
+  spreadsheetId: string,
+  accessToken: string,
+  fetcher: typeof fetch = fetch
+): Promise<string[]> {
+  const existingTitles = new Set(await readGoogleSpreadsheetTabTitles(spreadsheetId, accessToken, fetcher));
+  const missingTitles = GOOGLE_SHEET_TABS.filter((title) => !existingTitles.has(title));
+  if (missingTitles.length === 0) {
+    return [];
+  }
+
+  const response = await fetcher(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      requests: missingTitles.map((title) => ({
+        addSheet: {
+          properties: {
+            title
+          }
+        }
+      }))
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets schema prepare"));
+  }
+
+  return missingTitles;
 }
 
 export async function writeRawSheetValues(
@@ -101,7 +168,7 @@ export async function writeRawSheetValues(
   );
 
   if (!response.ok) {
-    throw new Error(`Google Sheets write failed with ${response.status}`);
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets write"));
   }
 }
 
@@ -124,7 +191,7 @@ export async function clearSheetValues(
   );
 
   if (!response.ok) {
-    throw new Error(`Google Sheets clear failed with ${response.status}`);
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets clear"));
   }
 }
 
@@ -146,7 +213,7 @@ export async function readSheetRanges(
   );
 
   if (!response.ok) {
-    throw new Error(`Google Sheets read failed with ${response.status}`);
+    throw new Error(await googleSheetsFailureMessage(response, "Google Sheets read"));
   }
 
   const body = (await response.json()) as {
@@ -159,4 +226,60 @@ export async function readSheetRanges(
       return [tabName, valueRange.values ?? []];
     })
   );
+}
+
+async function googleSheetsFailureMessage(response: Response, action: string): Promise<string> {
+  const detail = await readGoogleErrorDetail(response);
+  return detail ? `${action} failed with ${response.status}: ${detail}` : `${action} failed with ${response.status}`;
+}
+
+async function readGoogleErrorDetail(response: Response): Promise<string | null> {
+  let responseText: string;
+  try {
+    responseText = await response.clone().text();
+  } catch {
+    return null;
+  }
+
+  const trimmed = responseText.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const body = JSON.parse(trimmed) as GoogleApiErrorBody;
+    const parsed = parseGoogleErrorBody(body);
+    if (parsed) {
+      return parsed;
+    }
+  } catch {
+    // Fall back to the raw response text below.
+  }
+
+  return collapseWhitespace(trimmed).slice(0, 500);
+}
+
+function parseGoogleErrorBody(body: GoogleApiErrorBody): string | null {
+  if (isRecord(body.error)) {
+    return [stringValue(body.error.status), stringValue(body.error.message)].filter(Boolean).join(": ") || null;
+  }
+
+  return stringValue(body.error) ?? stringValue(body.error_description) ?? stringValue(body.message) ?? null;
+}
+
+function stringValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = collapseWhitespace(value.trim());
+  return trimmed || null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function collapseWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ");
 }

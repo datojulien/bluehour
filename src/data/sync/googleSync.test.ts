@@ -79,4 +79,16 @@ describe("Google Sheet sync planner", () => {
       status: "open"
     });
   });
+
+  it("enters read-only recovery when the remote schema is newer than this build", () => {
+    const local = createDemoSnapshot();
+    const plan = planGoogleSheetSync(local, {
+      remoteRevision: 5,
+      schemaVersion: 999,
+      snapshot: {}
+    });
+
+    expect(plan.action).toBe("read_only_recovery");
+    expect(plan.syncState.status).toBe("read_only_recovery");
+  });
 });

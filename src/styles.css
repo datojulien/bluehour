@@ -12,16 +12,16 @@
   --navy-900: #08233f;
   --navy-800: #123a5c;
   --blue-100: #d8e9f6;
-  --sky-500: #3d86b8;
+  --sky-500: #1f6f9f;
   --slate-700: #354254;
-  --slate-500: #667386;
+  --slate-500: #4a5868;
   --slate-300: #cbd5e1;
   --slate-200: #dce4ed;
   --slate-100: #eef3f8;
   --white: #ffffff;
   --green: #237a58;
   --green-soft: #e3f4eb;
-  --amber: #b7791f;
+  --amber: #7a4d0b;
   --amber-soft: #fff4d7;
   --red: #b42318;
   --red-soft: #fee4df;
@@ -57,7 +57,10 @@ button {
 }
 
 button:focus-visible,
-a:focus-visible {
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgba(61, 134, 184, 0.42);
   outline-offset: 2px;
 }
@@ -445,6 +448,10 @@ h3 {
   margin-top: 16px;
 }
 
+.dashboard-subsection {
+  margin-top: 16px;
+}
+
 .band-header {
   display: flex;
   align-items: flex-start;
@@ -481,6 +488,10 @@ h3 {
   margin-top: 6px;
   border-radius: 999px;
   background: var(--amber);
+}
+
+.timeline-lowest .timeline-dot {
+  background: var(--red);
 }
 
 .timeline-point strong,
@@ -1056,6 +1067,29 @@ h3 {
   min-height: 54px;
   padding: 10px 12px;
   background: var(--white);
+}
+
+.subscription-table .data-row {
+  grid-template-columns:
+    minmax(120px, 1fr)
+    minmax(100px, 0.75fr)
+    minmax(120px, 0.9fr)
+    minmax(120px, 0.9fr)
+    minmax(110px, 0.75fr)
+    minmax(130px, 1fr)
+    minmax(260px, 1.5fr);
+  min-width: 1080px;
+}
+
+.price-update-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.price-update-form input:not([type="checkbox"]) {
+  width: 96px;
 }
 
 .data-row.header {

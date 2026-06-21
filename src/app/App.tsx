@@ -11,6 +11,7 @@ import { SettingsPage } from "../features/settings/SettingsPage";
 import { useBluehourData } from "./providers/BluehourDataProvider";
 import { WelcomePage } from "../features/onboarding/WelcomePage";
 import { OnboardingPage } from "../features/onboarding/OnboardingPage";
+import { RecoveryStatePage } from "../features/recovery/RecoveryStatePage";
 
 export function App() {
   const { applicationState } = useBluehourData();
@@ -21,6 +22,20 @@ export function App() {
 
   if (applicationState === "setup" || applicationState === "ready_for_salary") {
     return <OnboardingPage />;
+  }
+
+  if (applicationState === "read_only_recovery") {
+    return <RecoveryStatePage />;
+  }
+
+  if (applicationState === "sync_conflict") {
+    return (
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route path="*" element={<SettingsPage />} />
+        </Route>
+      </Routes>
+    );
   }
 
   return (
