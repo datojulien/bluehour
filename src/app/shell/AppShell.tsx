@@ -117,6 +117,7 @@ export function AppShell() {
               <span className="sync-dot" aria-hidden="true" />
               {syncLabel}
             </div>
+            <div className="topbar-profile-label">{profileLabel}</div>
           </div>
 
           <div className="topbar-actions">

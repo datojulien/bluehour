@@ -106,6 +106,10 @@ a:focus-visible {
   font-size: 0.78rem;
 }
 
+.topbar-profile-label {
+  display: none;
+}
+
 .profile-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1205,6 +1209,13 @@ h3 {
 
   .sidebar {
     display: none;
+  }
+
+  .topbar-profile-label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--navy-500);
+    font-weight: 600;
   }
 
   .main-surface {
