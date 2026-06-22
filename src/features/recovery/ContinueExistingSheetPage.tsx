@@ -197,7 +197,13 @@ export function ContinueExistingSheetPage() {
           <li className={accessToken ? "complete" : "active"}>
             <strong>1. Sign in to Google</strong>
             <small>Uses the existing narrow Drive file scope. Tokens stay in memory.</small>
-            <button className="primary-action" type="button" onClick={() => void connectGoogle()} disabled={busy || !GOOGLE_CLIENT_ID}>
+            <button
+              className="primary-action"
+              type="button"
+              onClick={() => void connectGoogle()}
+              disabled={busy || !GOOGLE_CLIENT_ID}
+              aria-label="Continue with Google"
+            >
               <KeyRound size={16} aria-hidden="true" />
               <span>Continue with Google</span>
             </button>
