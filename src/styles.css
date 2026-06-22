@@ -1660,7 +1660,7 @@ h3 {
   }
 
   .recovery-steps .primary-action span {
-    display: revert;
+    display: inline;
   }
 
   .recovery-steps .primary-action {
