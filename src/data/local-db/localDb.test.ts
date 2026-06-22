@@ -11,6 +11,7 @@ import {
   putLocalRecords,
   replaceProfileSnapshot,
   resetDemoProfile,
+  resetLiveProfile,
   seedDemoIfNeeded
 } from "./localDb";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
@@ -120,6 +121,53 @@ describe("local IndexedDB repository", () => {
       googleEmail: "person@example.com",
       profileId: "profile-1",
       remoteRevision: 4
+    });
+  });
+
+  it("resets the live profile to a blank local setup without preserving Google connection data", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    const snapshot = await loadLiveSnapshot();
+    const account: Account = {
+      ...createRecordMeta("acc-reset"),
+      name: "Reset current account",
+      type: "bank",
+      role: "spendable",
+      trackingMode: "ledger",
+      currency: "MYR",
+      reconcileWeekly: true,
+      sortOrder: 1
+    };
+    await replaceProfileSnapshot("live", {
+      ...snapshot,
+      accounts: [account],
+      syncState: [
+        {
+          key: "google",
+          provider: "drive_appdata",
+          status: "synced",
+          driveManifestFileId: "manifest-file",
+          driveSlotAFileId: "slot-a-file",
+          driveSlotBFileId: "slot-b-file",
+          googleSubject: "google-subject",
+          googleEmail: "person@example.com",
+          profileId: "profile-1",
+          remoteRevision: 8,
+          lastSyncedAt: "2026-06-23T00:00:00.000Z"
+        }
+      ]
+    });
+
+    await resetLiveProfile();
+
+    const live = await loadLiveSnapshot();
+    expect(live.accounts).toEqual([]);
+    expect(live.transactions).toEqual([]);
+    expect(live.budgetCycles).toEqual([]);
+    expect(readProfileManifest(live.settings)?.lifecycle).toBe("setup");
+    expect(live.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt)).toBeUndefined();
+    expect(live.syncState[0]).toMatchObject({
+      key: "google",
+      status: "saved_locally"
     });
   });
 

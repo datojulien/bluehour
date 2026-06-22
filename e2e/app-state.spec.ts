@@ -38,7 +38,7 @@ test("continue with Google creates a Drive vault for a fresh browser", async ({ 
 
   await expect(page.getByRole("heading", { name: /Continue with Google/i })).toBeVisible();
   await page.getByRole("button", { name: /Continue with Google/i }).click();
-  await expect(page.getByRole("heading", { name: "Google", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Preferences", exact: true })).toBeVisible();
   await expect(page.getByText(/Saved to Google Drive/i)).toBeVisible();
 });
 
@@ -86,6 +86,25 @@ test("live changes auto-sync during an active Google session", async ({ page }) 
     .poll(async () => (await getStoreRecords<{ status: string; message?: string }>(page, "bluehour-profile-live", "syncState"))[0]?.message)
     .toContain("Auto-synced to Google Drive");
   expect(await page.evaluate(() => window.__bluehourGoogleTokenRequests ?? 0)).toBe(tokenRequestsAfterManualSync);
+});
+
+test("delete local live data requires confirmation and restarts blank setup", async ({ page }) => {
+  await completeLiveOnboarding(page);
+  await page.goto("/#/settings");
+
+  const deleteButton = page.getByRole("button", { name: /Delete local data and restart/i });
+  await expect(deleteButton).toBeDisabled();
+
+  await page.getByLabel("Type DELETE LOCAL DATA").fill("DELETE LOCAL DATA");
+  await page.getByLabel(/I understand this deletes this browser's live profile/i).check();
+  await expect(deleteButton).toBeEnabled();
+  await deleteButton.click();
+
+  await expect(page.getByRole("heading", { level: 1, name: "Google", exact: true })).toBeVisible();
+  await expect.poll(async () => (await getStoreRecords(page, "bluehour-profile-live", "accounts")).length).toBe(0);
+  await expect.poll(async () => (await getStoreRecords(page, "bluehour-profile-live", "transactions")).length).toBe(0);
+  await expect.poll(async () => (await getStoreRecords(page, "bluehour-profile-live", "budgetCycles")).length).toBe(0);
+  await expect.poll(async () => (await getStoreRecords<{ status: string }>(page, "bluehour-profile-live", "syncState"))[0]?.status).toBe("saved_locally");
 });
 
 test("mobile navigation exposes remaining destinations through More", async ({ page }) => {

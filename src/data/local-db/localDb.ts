@@ -258,6 +258,18 @@ export async function resetDemoProfile(): Promise<void> {
   db.close();
 }
 
+export async function resetLiveProfile(): Promise<void> {
+  const db = await openBluehourDb("live");
+  const tx = db.transaction(SEED_STORES, "readwrite");
+  for (const store of MUTABLE_STORES) {
+    await tx.objectStore(store).clear();
+  }
+  await tx.objectStore("meta").clear();
+  await tx.done;
+  db.close();
+  await initializeLiveProfile();
+}
+
 export async function initializeLiveProfile(): Promise<void> {
   const db = await openBluehourDb("live");
   const existingSyncState = await db.get("syncState", "google");

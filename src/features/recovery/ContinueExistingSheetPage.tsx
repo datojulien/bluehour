@@ -14,6 +14,7 @@ import {
 } from "../../data/google/googleAuth";
 import { initializeLiveProfile, loadLiveSnapshot } from "../../data/local-db/localDb";
 import { inspectDriveVaultProfile, prepareDriveVaultRestore, type DriveProfileInspection } from "../../data/recovery/driveProfile";
+import type { PreparedRemoteRestore } from "../../data/recovery/remoteProfile";
 import {
   hasMeaningfulProfileData,
   nextManifestForCheckpoint,
@@ -111,12 +112,15 @@ export function ContinueWithGooglePage() {
       await pushSnapshotToDriveVault(files, localSnapshot, token, fetch, nextRemoteRevision, existingRevision);
       const remote = await readSnapshotFromDriveVault(files, token);
       const nextInspection = inspectDriveVaultProfile(files, profile, remote);
-      const restore = prepareDriveVaultRestore({
-        inspection: nextInspection,
-        now: new Date().toISOString(),
-        appVersion: __BLUEHOUR_VERSION__,
-        deviceId: deviceIdentity?.deviceId
-      });
+      const restore = checkpointRestoreAfterGoogle(
+        prepareDriveVaultRestore({
+          inspection: nextInspection,
+          now: new Date().toISOString(),
+          appVersion: __BLUEHOUR_VERSION__,
+          deviceId: deviceIdentity?.deviceId
+        }),
+        deviceIdentity?.deviceId
+      );
       await restoreRemoteProfile(restore);
       setStatus("Google Drive vault created. Setup can continue on this device or another browser.");
     } catch (caught) {
@@ -306,6 +310,24 @@ function checkpointSnapshotAfterGoogle(snapshot: BluehourSnapshot, deviceId?: st
   return {
     ...snapshot,
     settings: [...snapshot.settings.filter((setting) => setting.id !== manifestSetting.id), manifestSetting]
+  };
+}
+
+function checkpointRestoreAfterGoogle(restore: PreparedRemoteRestore, deviceId?: string): PreparedRemoteRestore {
+  const snapshot = checkpointSnapshotAfterGoogle(restore.snapshot, deviceId);
+  const manifest = readProfileManifest(snapshot.settings);
+  if (!manifest || manifest.lifecycle !== "setup" || !manifest.onboardingStep) {
+    return restore;
+  }
+
+  return {
+    ...restore,
+    snapshot,
+    manifest,
+    shell: {
+      applicationState: "setup",
+      onboardingStep: manifest.onboardingStep
+    }
   };
 }
 

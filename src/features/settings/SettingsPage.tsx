@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Download, Plus, RefreshCw, ShieldCheck, Unlink, Upload } from "lucide-react";
+import { Download, Plus, RefreshCw, ShieldCheck, Trash2, Unlink, Upload } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { decryptBackup, encryptBackup, type EncryptedBackupEnvelope } from "../../data/backup/encryptedBackup";
 import {
@@ -42,8 +42,19 @@ import { readProfileManifest } from "../../domain/profileManifest";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 export function SettingsPage() {
-  const { snapshot, asOfDate, deviceIdentity, loading, error, saveRecords, restoreProfileSnapshot, applyRemoteSync, isDemo, canUseGoogleSync } =
-    useBluehourData();
+  const {
+    snapshot,
+    asOfDate,
+    deviceIdentity,
+    loading,
+    error,
+    saveRecords,
+    restoreProfileSnapshot,
+    applyRemoteSync,
+    deleteLiveDataAndRestart,
+    isDemo,
+    canUseGoogleSync
+  } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
   if (loading) {
@@ -170,6 +181,13 @@ export function SettingsPage() {
         />
         <CsvExportPanel snapshot={snapshot} isDemo={isDemo} />
       </section>
+
+      <DangerZonePanel
+        isDemo={isDemo}
+        onDeleteLiveData={async () => {
+          await deleteLiveDataAndRestart();
+        }}
+      />
 
       <section className="dashboard-band">
         <div className="band-header">
@@ -922,6 +940,74 @@ function CsvExportPanel({ snapshot, isDemo }: { snapshot: BluehourSnapshot; isDe
         <button className="secondary-action" type="button" onClick={() => downloadText(`${prefix}-subscriptions.csv`, toCsv(["id", "provider", "billingFrequency", "nextPaymentDate"], snapshot.subscriptions))}>
           Subscriptions CSV
         </button>
+      </div>
+    </section>
+  );
+}
+
+const DELETE_CONFIRMATION_TEXT = "DELETE LOCAL DATA";
+
+function DangerZonePanel({ isDemo, onDeleteLiveData }: { isDemo: boolean; onDeleteLiveData: () => Promise<void> }) {
+  const [confirmationText, setConfirmationText] = useState("");
+  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const canDelete = !isDemo && backupConfirmed && confirmationText.trim() === DELETE_CONFIRMATION_TEXT;
+
+  async function deleteLiveData() {
+    setMessage(null);
+    if (!canDelete) {
+      setMessage(`Type ${DELETE_CONFIRMATION_TEXT} and confirm you understand the reset before deleting data.`);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await onDeleteLiveData();
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Could not delete local data");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="dashboard-band">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Danger zone</p>
+          <h2>Delete local data and restart</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        <p>
+          This clears the live profile stored in this browser and restarts Bluehour at a blank live setup. It does not delete the hidden Google Drive
+          vault or data stored in another browser.
+        </p>
+        {isDemo ? <p className="form-note danger-text">Switch to the live profile before deleting local live data. Demo reset is available in the top bar.</p> : null}
+        <label>
+          Type {DELETE_CONFIRMATION_TEXT}
+          <input
+            value={confirmationText}
+            onChange={(event) => setConfirmationText(event.target.value)}
+            disabled={busy || isDemo}
+            aria-describedby="delete-local-data-warning"
+          />
+        </label>
+        <p className="form-note danger-text" id="delete-local-data-warning">
+          Export an encrypted backup first if you may need this browser's current data again.
+        </p>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={backupConfirmed} onChange={(event) => setBackupConfirmed(event.target.checked)} disabled={busy || isDemo} />
+          I understand this deletes this browser's live profile and cannot be undone locally.
+        </label>
+        <div className="form-actions">
+          <button className="secondary-action danger-action" type="button" onClick={() => void deleteLiveData()} disabled={busy || !canDelete}>
+            <Trash2 size={16} aria-hidden="true" />
+            Delete local data and restart
+          </button>
+        </div>
+        {message ? <p className="form-note danger-text">{message}</p> : null}
       </div>
     </section>
   );

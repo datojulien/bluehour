@@ -213,6 +213,8 @@ Priority weights are Low 1, Normal 2, High 3. Essential categories are funded fr
 
 Settings can create encrypted JSON backups with Web Crypto. The passphrase is never stored. Restore validates the backup, warns when profile types differ, and replaces the current local profile atomically after explicit confirmation.
 
+Settings also includes a guarded local reset for the live profile. It requires typing `DELETE LOCAL DATA` and confirming the warning, then clears this browser's `bluehour-profile-live` data and restarts blank setup. It does not delete the hidden Google Drive vault or data stored in another browser.
+
 ## Privacy Model
 
 - No analytics or telemetry.

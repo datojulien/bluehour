@@ -21,6 +21,8 @@ Bluehour is a static browser app. The deployed app code is public. The user's fi
 
 Real live data in IndexedDB is protected primarily by the user's macOS account and browser sandbox. Local cache encryption at rest is not implemented for v1.
 
+The Settings danger-zone reset clears only this browser's live IndexedDB profile after typed confirmation. It preserves the hidden Google Drive vault and any other browser caches, so remote deletion or overwrite remains an explicit later sync choice.
+
 ## Backup Encryption
 
 Encrypted JSON backups use Web Crypto authenticated encryption. The passphrase is never stored.

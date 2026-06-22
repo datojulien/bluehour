@@ -10,6 +10,7 @@ import {
   putLocalRecords,
   replaceProfileSnapshot,
   resetDemoProfile,
+  resetLiveProfile,
   type LocalMutation,
   type MutableRecord,
   type MutableStoreName,
@@ -35,7 +36,7 @@ import {
   type DriveConnectionDescriptor,
   type DriveVaultFiles
 } from "../../data/google/driveAppDataVault";
-import { GOOGLE_DRIVE_VAULT_SCOPES, getInMemoryGoogleAccessToken } from "../../data/google/googleAuth";
+import { GOOGLE_DRIVE_VAULT_SCOPES, clearInMemoryGoogleAccessToken, getInMemoryGoogleAccessToken } from "../../data/google/googleAuth";
 import { planRemoteSnapshotSync } from "../../data/sync/remoteSync";
 import { createTransactionRecords, type TransactionDraft } from "../../domain/transactions/commands";
 import {
@@ -66,6 +67,7 @@ interface BluehourDataContextValue {
   reload: () => Promise<void>;
   exploreDemo: () => Promise<void>;
   resetDemo: () => Promise<void>;
+  deleteLiveDataAndRestart: () => Promise<void>;
   returnToWelcome: () => Promise<void>;
   startLiveSetup: () => Promise<void>;
   startGoogleRecovery: () => Promise<void>;
@@ -147,6 +149,18 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     });
     setShellState(nextShell);
     setSnapshot(await loadProfileSnapshot("demo"));
+  }
+
+  async function deleteLiveDataAndRestart() {
+    clearInMemoryGoogleAccessToken();
+    await resetLiveProfile();
+    const nextShell = await saveShellState({
+      activeProfile: "live",
+      applicationState: "setup",
+      onboardingStep: "google"
+    });
+    setShellState(nextShell);
+    setSnapshot(await loadProfileSnapshot("live"));
   }
 
   async function returnToWelcome() {
@@ -517,6 +531,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     reload,
     exploreDemo,
     resetDemo,
+    deleteLiveDataAndRestart,
     returnToWelcome,
     startLiveSetup,
     startGoogleRecovery,
