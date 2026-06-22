@@ -5,6 +5,7 @@ import {
   ensureBluehourSheetSchema,
   extractSpreadsheetId,
   GOOGLE_SHEET_TABS,
+  listBluehourSpreadsheets,
   readSheetRanges,
   writeRawSheetValues
 } from "./googleSheetsAdapter";
@@ -60,6 +61,45 @@ describe("Google Sheets adapter", () => {
     await expect(createBluehourSpreadsheet("token", fetcher as unknown as typeof fetch)).rejects.toThrow(
       "Google Sheets create failed with 403: PERMISSION_DENIED: Google Sheets API has not been used in this project or it is disabled."
     );
+  });
+
+  it("finds app-accessible Bluehour spreadsheets through Drive metadata", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            files: [
+              {
+                id: "sheet-1",
+                name: "Bluehour Finance Data",
+                modifiedTime: "2026-06-22T09:42:00.000Z"
+              },
+              {
+                id: 123,
+                name: "Ignored malformed result"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const files = await listBluehourSpreadsheets("token", fetcher as unknown as typeof fetch);
+
+    expect(files).toEqual([
+      {
+        id: "sheet-1",
+        name: "Bluehour Finance Data",
+        modifiedTime: "2026-06-22T09:42:00.000Z"
+      }
+    ]);
+    const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
+    const url = new URL(calls[0][0]);
+    expect(url.origin).toBe("https://www.googleapis.com");
+    expect(url.pathname).toBe("/drive/v3/files");
+    expect(url.searchParams.get("q")).toContain("name contains 'Bluehour'");
+    expect(url.searchParams.get("fields")).toBe("files(id,name,modifiedTime)");
+    expect(calls[0][1].headers).toEqual({ Authorization: "Bearer token" });
   });
 
   it("writes values using RAW input", async () => {

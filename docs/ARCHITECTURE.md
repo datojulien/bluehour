@@ -40,10 +40,10 @@ The legacy database is detected where browser support allows it, but is not open
 
 The browser-local shell database remains local and is not mirrored to Google. Cross-device resume is driven by the synced `profileManifest` settings record. Onboarding commands update the local shell state and the manifest checkpoint together so another device can resume at `accounts`, `income`, `obligations`, `budget`, `wait_salary`, `start_cycle`, or the live app after the profile has been synced.
 
-The Continue-from-existing-Sheet flow is intentionally read-only until confirmation:
+The Continue-with-Google recovery flow is intentionally read-only until confirmation:
 
 1. Connect Google with the existing narrow scope.
-2. Enter a Sheet URL or raw spreadsheet ID.
+2. Search app-accessible spreadsheet metadata for Bluehour files, with Sheet URL/raw spreadsheet ID as a fallback.
 3. Read Sheet metadata, `Meta`, active slot, records, and the manifest.
 4. Validate schemas and show counts/status without balances or transaction descriptions.
 5. Require confirmation before replacing local live data.

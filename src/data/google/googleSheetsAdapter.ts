@@ -38,6 +38,12 @@ export interface ConnectionDescriptor {
   lastSuccessfulSyncAt?: string;
 }
 
+export interface GoogleDriveFileSummary {
+  id: string;
+  name: string;
+  modifiedTime?: string;
+}
+
 interface GoogleApiErrorBody {
   error?: {
     message?: unknown;
@@ -108,6 +114,33 @@ export function extractSpreadsheetId(input: string): string {
   const trimmed = input.trim();
   const match = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(trimmed);
   return match?.[1] ?? trimmed;
+}
+
+export async function listBluehourSpreadsheets(accessToken: string, fetcher: typeof fetch = fetch): Promise<GoogleDriveFileSummary[]> {
+  const query = [
+    "mimeType = 'application/vnd.google-apps.spreadsheet'",
+    "trashed = false",
+    "name contains 'Bluehour'"
+  ].join(" and ");
+  const search = new URLSearchParams({
+    q: query,
+    fields: "files(id,name,modifiedTime)",
+    pageSize: "10",
+    orderBy: "modifiedTime desc"
+  });
+  const response = await fetcher(`https://www.googleapis.com/drive/v3/files?${search.toString()}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(await googleSheetsFailureMessage(response, "Google Drive file search"));
+  }
+
+  const body = (await response.json()) as { files?: unknown[] };
+  return (body.files ?? []).filter(isGoogleDriveFileSummary);
 }
 
 export async function createBluehourSpreadsheet(accessToken: string, fetcher: typeof fetch = fetch): Promise<string> {
@@ -336,6 +369,10 @@ function integerValue(value: unknown): number | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isGoogleDriveFileSummary(value: unknown): value is GoogleDriveFileSummary {
+  return isRecord(value) && typeof value.id === "string" && typeof value.name === "string";
 }
 
 function collapseWhitespace(value: string): string {

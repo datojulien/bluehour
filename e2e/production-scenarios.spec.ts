@@ -14,7 +14,7 @@ test.describe("production readiness scenarios", () => {
     await expect(page.getByRole("heading", { name: /Personal cash-flow planning/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Explore demonstration/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Set up new finances/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continue with Google/i })).toBeVisible();
   });
 
   test("2. demo mode contains fictional records", async ({ page }) => {
@@ -359,7 +359,7 @@ test.describe("production readiness scenarios", () => {
     await expect(page.getByText(/Google Sheet created/i)).toBeVisible();
   });
 
-  test("31. continue existing Sheet shows a remote profile preview", async ({ page }) => {
+  test("31. Continue with Google shows a remote profile preview", async ({ page }) => {
     await page.addInitScript(() => {
       window.google = {
         accounts: {
@@ -370,6 +370,21 @@ test.describe("production readiness scenarios", () => {
           }
         }
       };
+    });
+    await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files.*/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          files: [
+            {
+              id: "mockExistingSheet",
+              name: "Bluehour Finance Data",
+              modifiedTime: "2026-06-22T09:42:00.000Z"
+            }
+          ]
+        })
+      });
     });
     await page.route("https://sheets.googleapis.com/v4/spreadsheets/mockExistingSheet?fields=sheets.properties.title", async (route) => {
       await route.fulfill({
@@ -422,12 +437,10 @@ test.describe("production readiness scenarios", () => {
     });
 
     await page.goto("/");
-    await page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i }).click();
-    await page.getByRole("button", { name: /Connect Google/i }).click();
-    await page.getByLabel("Sheet URL or ID").fill("mockExistingSheet");
-    await page.getByRole("button", { name: /Inspect profile/i }).click();
+    await page.getByRole("button", { name: /Continue with Google/i }).click();
+    await page.getByRole("button", { name: /Continue with Google/i }).click();
 
-    await expect(page.getByText("Remote profile inspected. No data was written to the Sheet or this device.")).toBeVisible();
+    await expect(page.getByText("Found Bluehour Finance Data and inspected the remote profile.")).toBeVisible();
     await expect(page.getByLabel("Remote profile preview").getByText("Personal finances")).toBeVisible();
     await expect(page.getByText(/Remote revision/i)).toBeVisible();
   });

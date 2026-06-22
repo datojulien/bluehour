@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Search, ShieldCheck } from "lucide-react";
+import { KeyRound, Link, Search, ShieldCheck } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
-import { ensureBluehourSheetSchema } from "../../data/google/googleSheetsAdapter";
+import { ensureBluehourSheetSchema, listBluehourSpreadsheets, type GoogleDriveFileSummary } from "../../data/google/googleSheetsAdapter";
 import { pushSnapshotToGoogleSheet } from "../../data/google/sheetSerialization";
 import { loadLiveSnapshot } from "../../data/local-db/localDb";
 import {
@@ -33,6 +33,9 @@ export function ContinueExistingSheetPage() {
   const { loading, error, deviceIdentity, restoreRemoteProfile, returnToWelcome } = useBluehourData();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [sheetInput, setSheetInput] = useState("");
+  const [manualMode, setManualMode] = useState(false);
+  const [discoveredSheets, setDiscoveredSheets] = useState<GoogleDriveFileSummary[]>([]);
+  const [discoveryComplete, setDiscoveryComplete] = useState(false);
   const [inspection, setInspection] = useState<RemoteProfileInspection | null>(null);
   const [localHasData, setLocalHasData] = useState(false);
   const [localProfileId, setLocalProfileId] = useState<string | null>(null);
@@ -45,6 +48,7 @@ export function ContinueExistingSheetPage() {
     const match = /^#connect=([a-zA-Z0-9-_]+)/.exec(window.location.hash);
     if (match?.[1]) {
       setSheetInput(match[1]);
+      setManualMode(true);
     }
   }, []);
 
@@ -66,13 +70,35 @@ export function ContinueExistingSheetPage() {
   async function connectGoogle() {
     setBusy(true);
     setStatus(null);
+    setInspection(null);
+    setDiscoveredSheets([]);
+    setDiscoveryComplete(false);
     try {
       if (!GOOGLE_CLIENT_ID) {
         throw new Error("Set VITE_GOOGLE_CLIENT_ID before connecting Google");
       }
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
       setAccessToken(token);
-      setStatus("Google connected for this operation. The access token remains in memory only.");
+      const linkedSheetId = sheetInput.trim();
+      if (linkedSheetId) {
+        await loadInspection(linkedSheetId, token, "Google connected. The linked Bluehour profile was inspected.");
+        setDiscoveryComplete(true);
+        return;
+      }
+
+      const files = await listBluehourSpreadsheets(token);
+      setDiscoveredSheets(files);
+      setDiscoveryComplete(true);
+      if (files.length === 0) {
+        setManualMode(true);
+        setStatus("Google connected. Bluehour could not find an app-accessible Sheet, so paste the link or ID as a fallback.");
+        return;
+      }
+      if (files.length === 1) {
+        await loadInspection(files[0].id, token, `Found ${files[0].name} and inspected the remote profile.`);
+        return;
+      }
+      setStatus(`Found ${files.length} possible Bluehour Sheets. Choose one to preview before restoring this device.`);
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : "Google connection failed");
     } finally {
@@ -80,7 +106,14 @@ export function ContinueExistingSheetPage() {
     }
   }
 
-  async function inspectSheet() {
+  async function loadInspection(input: string, token: string, successMessage: string) {
+    const result = await inspectRemoteBluehourSheet(input, token);
+    setSheetInput(result.spreadsheetId);
+    setInspection(result);
+    setStatus(successMessage);
+  }
+
+  async function inspectSheet(input = sheetInput) {
     setBusy(true);
     setStatus(null);
     setInspection(null);
@@ -88,9 +121,7 @@ export function ContinueExistingSheetPage() {
       if (!accessToken) {
         throw new Error("Connect Google before inspecting the Sheet");
       }
-      const result = await inspectRemoteBluehourSheet(sheetInput, accessToken);
-      setInspection(result);
-      setStatus("Remote profile inspected. No data was written to the Sheet or this device.");
+      await loadInspection(input, accessToken, "Remote profile inspected. No data was written to the Sheet or this device.");
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : "Sheet inspection failed");
     } finally {
@@ -152,8 +183,11 @@ export function ContinueExistingSheetPage() {
       <section className="welcome-panel recovery-wizard">
         <div className="welcome-copy">
           <p className="eyebrow">Cross-device recovery</p>
-          <h1>Continue from an existing Bluehour Sheet</h1>
-          <p>Connect your Google account, paste the Sheet URL or ID, preview the remote profile, then choose whether this device should use it.</p>
+          <h1>Continue with Google</h1>
+          <p>
+            Sign in and Bluehour will look for the private Sheet this app can access. Paste a link only if the Sheet is older, renamed, or shared
+            from another account.
+          </p>
         </div>
 
         {error ? <div className="alert-band danger">{error}</div> : null}
@@ -161,27 +195,59 @@ export function ContinueExistingSheetPage() {
 
         <ol className="recovery-steps">
           <li className={accessToken ? "complete" : "active"}>
-            <strong>1. Connect Google</strong>
-            <small>Uses the existing narrow Google Sheets scope. Tokens stay in memory.</small>
+            <strong>1. Sign in to Google</strong>
+            <small>Uses the existing narrow Drive file scope. Tokens stay in memory.</small>
             <button className="primary-action" type="button" onClick={() => void connectGoogle()} disabled={busy || !GOOGLE_CLIENT_ID}>
               <KeyRound size={16} aria-hidden="true" />
-              Connect Google
+              <span>Continue with Google</span>
             </button>
           </li>
           <li className={inspection ? "complete" : accessToken ? "active" : ""}>
-            <strong>2. Choose or enter the existing Sheet</strong>
-            <small>This does not create a new Sheet.</small>
-            <label>
-              Sheet URL or ID
-              <input value={sheetInput} onChange={(event) => setSheetInput(event.target.value)} />
-            </label>
-            <button className="secondary-action" type="button" onClick={() => void inspectSheet()} disabled={busy || !accessToken || !sheetInput}>
-              <Search size={16} aria-hidden="true" />
-              Inspect profile
-            </button>
+            <strong>2. Find the Bluehour Sheet</strong>
+            <small>This searches app-accessible Google Sheets and never creates a new Sheet.</small>
+            {discoveredSheets.length > 1 ? (
+              <div className="sheet-choice-list" aria-label="Found Bluehour Sheets">
+                {discoveredSheets.map((sheet) => (
+                  <button
+                    className={inspection?.spreadsheetId === sheet.id ? "sheet-choice-card active" : "sheet-choice-card"}
+                    type="button"
+                    key={sheet.id}
+                    onClick={() => void inspectSheet(sheet.id)}
+                    disabled={busy || !accessToken}
+                  >
+                    <span>
+                      <strong>{sheet.name}</strong>
+                      <small>{sheet.modifiedTime ? `Last modified ${formatDateTime(sheet.modifiedTime)}` : "Google did not report a modified time"}</small>
+                    </span>
+                    <Search size={16} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {discoveryComplete && discoveredSheets.length === 0 ? (
+              <small>No app-accessible Bluehour Sheet appeared for this Google sign-in.</small>
+            ) : null}
+            {!manualMode && accessToken ? (
+              <button className="secondary-action" type="button" onClick={() => setManualMode(true)} disabled={busy}>
+                <Link size={16} aria-hidden="true" />
+                Enter Sheet link or ID instead
+              </button>
+            ) : null}
+            {manualMode ? (
+              <div className="manual-sheet-entry">
+                <label>
+                  Sheet link or ID fallback
+                  <input value={sheetInput} onChange={(event) => setSheetInput(event.target.value)} />
+                </label>
+                <button className="secondary-action" type="button" onClick={() => void inspectSheet()} disabled={busy || !accessToken || !sheetInput}>
+                  <Search size={16} aria-hidden="true" />
+                  Inspect profile
+                </button>
+              </div>
+            ) : null}
           </li>
           <li className={inspection ? "active" : ""}>
-            <strong>3. Inspect profile</strong>
+            <strong>3. Preview profile</strong>
             {inspection ? <RemotePreview inspection={inspection} /> : <small>No remote data has been read yet.</small>}
           </li>
           <li className={inspection ? "active" : ""}>

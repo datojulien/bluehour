@@ -619,10 +619,11 @@ function GoogleSettings({
       "Moving from laptop to desktop",
       "1. On this device, press Sync now and confirm Bluehour says Saved to Google.",
       "2. On the other device, open the same hosted Bluehour app.",
-      "3. Choose Continue from an existing Bluehour Sheet.",
-      `4. Paste this Sheet ID: ${spreadsheetId}`,
-      `Connection link: ${connectionLink}`,
-      "Google sign-in is still required; this link is not authorisation."
+      "3. Choose Continue with Google.",
+      "4. Sign into the same Google account and let Bluehour find the Sheet.",
+      `Fallback Sheet ID if it does not appear: ${spreadsheetId}`,
+      `Fallback connection link: ${connectionLink}`,
+      "Google sign-in is still required; the ID and link are not authorisation."
     ].join("\n");
     await navigator.clipboard?.writeText(text);
     setStatus("Connection instructions copied.");
@@ -776,8 +777,8 @@ function GoogleSettings({
         <div className="continue-device-card">
           <strong>Continue on another device</strong>
           <p>
-            Sync this device first, then open the same hosted Bluehour app elsewhere and choose Continue from an existing Bluehour Sheet. Google
-            access still controls the Sheet.
+            Sync this device first, then open the same hosted Bluehour app elsewhere and choose Continue with Google. Bluehour will look for the
+            Sheet this app can access; Google access still controls it.
           </p>
         </div>
         {status ? <p className="form-note">{status}</p> : null}

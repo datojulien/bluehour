@@ -73,6 +73,7 @@ The only expected unchecked stable-release gate is real external Google verifica
 The required manual checklist is in `docs/RC_CHECKLIST.md` and includes:
 
 - Configure `VITE_GOOGLE_CLIENT_ID` in GitHub repository variables.
+- Enable Google Sheets API and Google Drive API in the Google Cloud project.
 - Configure the authorised JavaScript origin in Google Cloud.
 - Deploy GitHub Pages.
 - Open the deployed app in Safari and add it to the Dock.

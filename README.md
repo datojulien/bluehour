@@ -14,7 +14,7 @@ First launch shows three choices:
 
 - **Explore demonstration** opens isolated fictional MYR data with a fixed demo date.
 - **Set up new finances** creates or resumes an empty live profile using the browser-local date.
-- **Continue from an existing Bluehour Sheet** opens a recovery wizard that authenticates with Google, accepts an existing Sheet URL or ID, previews the remote profile, and restores only after confirmation.
+- **Continue with Google** opens a recovery wizard that authenticates with Google, finds app-accessible Bluehour Sheets automatically, previews the remote profile, and restores only after confirmation. A Sheet URL or ID remains available as a fallback.
 
 Storage is isolated:
 
@@ -97,11 +97,11 @@ It is a public browser OAuth client ID, not a secret.
 
 Use the same Google Cloud project for every step below:
 
-1. Enable the **Google Sheets API** in APIs & Services.
+1. Enable the **Google Sheets API** and **Google Drive API** in APIs & Services.
 2. Configure the OAuth consent screen.
 3. Create an OAuth client for a web application.
 
-A `Google Sheets create failed with 403` error usually means the Sheets API is not enabled for the project that owns `VITE_GOOGLE_CLIENT_ID`, or the OAuth consent/scope setup is incomplete.
+A `Google Sheets create failed with 403` or `Google Drive file search failed with 403` error usually means the matching API is not enabled for the project that owns `VITE_GOOGLE_CLIENT_ID`, or the OAuth consent/scope setup is incomplete.
 
 For local development, add this exact authorized JavaScript origin:
 
@@ -131,7 +131,7 @@ Bluehour requests only:
 https://www.googleapis.com/auth/drive.file
 ```
 
-Access tokens are memory-only and are cleared after user-initiated actions.
+Access tokens are memory-only and are cleared after user-initiated actions. Sheet discovery uses Drive file metadata for app-accessible spreadsheets only; it does not request broad Google Drive access.
 
 ## Google Sheet Storage
 
@@ -161,9 +161,9 @@ Moving from laptop to desktop:
 2. Press Save progress to Google or Sync now.
 3. Confirm the app says Saved to Google.
 4. On the desktop, open Bluehour.
-5. Choose Continue from an existing Bluehour Sheet.
-6. Sign into Google.
-7. Paste the Sheet URL.
+5. Choose Continue with Google.
+6. Sign into the same Google account.
+7. Let Bluehour find the app-accessible Sheet, or paste the Sheet link/ID only if it does not appear.
 8. Confirm the remote profile.
 9. Continue onboarding or open the dashboard.
 10. Before returning to the laptop, sync the desktop.

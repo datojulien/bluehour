@@ -6,8 +6,10 @@ Google Sheets is an app-managed remote store for the live profile. Demo mode can
 
 - Client ID comes from `VITE_GOOGLE_CLIENT_ID`.
 - The client ID is public configuration, not a secret.
+- The Google Cloud project must have both Google Sheets API and Google Drive API enabled.
 - Requested scope: `https://www.googleapis.com/auth/drive.file`.
 - Access tokens are kept in memory only and cleared after user-initiated actions.
+- Continue-with-Google discovery lists app-accessible spreadsheet file metadata (`id`, `name`, `modifiedTime`) through Drive before reading a chosen Sheet. It does not request broad Drive access.
 
 ## Sheet Schema
 

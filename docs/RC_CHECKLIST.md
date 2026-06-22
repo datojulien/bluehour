@@ -19,6 +19,7 @@ Cross-device recovery work remains unreleased until the full automated gate pass
 ## External Manual Gate Before Stable `1.0.0`
 
 - [ ] Configure `VITE_GOOGLE_CLIENT_ID` in GitHub repository variables.
+- [ ] Enable Google Sheets API and Google Drive API in the Google Cloud project.
 - [ ] Configure the authorised JavaScript origin in Google Cloud.
 - [ ] Deploy GitHub Pages.
 - [ ] Open the deployed app in Safari.
@@ -51,7 +52,7 @@ Laptop-to-desktop onboarding:
 - [ ] Save through the Budget step
 - [ ] Confirm the remote revision advanced
 - [ ] Open a clean browser profile on device B
-- [ ] Continue from the same Sheet
+- [ ] Continue with Google and confirm the same Sheet is found without pasting a URL
 - [ ] Confirm onboarding resumes at the correct step
 - [ ] Complete another step on device B
 - [ ] Sync device B

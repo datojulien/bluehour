@@ -22,15 +22,16 @@ Google Sheet schema v3 uses active/inactive slots. If a staged push fails before
 
 If a Sheet is malformed or uses a newer unsupported schema, Bluehour refuses to replace valid local data and enters read-only recovery.
 
-## Continue From Existing Sheet
+## Continue With Google
 
-The welcome screen offers `Continue from an existing Bluehour Sheet`. This path never creates a new Sheet. It requires the user to:
+The welcome screen offers `Continue with Google`. This path never creates a new Sheet. It requires the user to:
 
-1. Connect Google.
-2. Paste a full Sheet URL or raw spreadsheet ID.
-3. Let Bluehour inspect metadata, `Meta`, active slot records, schema version, remote revision, record counts, and the profile manifest.
-4. Preview profile name, lifecycle, currency, last saved time, revision, and counts.
-5. Confirm local device setup before any local replacement.
+1. Sign in with Google.
+2. Let Bluehour search app-accessible spreadsheets for Bluehour files.
+3. Choose a found Sheet when more than one appears, or paste a full Sheet URL/raw spreadsheet ID as a fallback.
+4. Let Bluehour inspect metadata, `Meta`, active slot records, schema version, remote revision, record counts, and the profile manifest.
+5. Preview profile name, lifecycle, currency, last saved time, revision, and counts.
+6. Confirm local device setup before any local replacement.
 
 If the live profile on this device already contains meaningful records, Bluehour offers cancel/export/use local/replace choices in the UI and requires explicit replacement confirmation. Different profile IDs are never merged automatically.
 

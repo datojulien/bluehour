@@ -930,6 +930,42 @@ h3 {
   border-color: #bfe4c7;
 }
 
+.sheet-choice-list,
+.manual-sheet-entry {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.sheet-choice-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 58px;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 0.75rem;
+  color: var(--navy-950);
+  background: #fbfdff;
+  text-align: left;
+}
+
+.sheet-choice-card.active,
+.sheet-choice-card:hover,
+.sheet-choice-card:focus-visible {
+  border-color: #8ab4e8;
+  background: var(--blue-100);
+}
+
+.sheet-choice-card span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sheet-choice-card small {
+  color: var(--slate-500);
+}
+
 .remote-preview,
 .sync-summary-grid {
   display: grid;

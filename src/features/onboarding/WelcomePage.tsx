@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Database, Landmark, Link } from "lucide-react";
+import { Database, KeyRound, Landmark } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 
 export function WelcomePage() {
@@ -50,10 +50,10 @@ export function WelcomePage() {
             </span>
           </button>
           <button className="choice-button" type="button" onClick={() => void startExistingSheetRecovery()}>
-            <Link size={22} aria-hidden="true" />
+            <KeyRound size={22} aria-hidden="true" />
             <span>
-              <strong>Continue from an existing Bluehour Sheet</strong>
-              <small>Connect Google, preview the private Sheet, then restore this device.</small>
+              <strong>Continue with Google</strong>
+              <small>Sign in, find your Bluehour Sheet, preview it, then restore this device.</small>
             </span>
           </button>
         </div>

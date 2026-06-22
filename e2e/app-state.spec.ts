@@ -6,7 +6,7 @@ test("fresh launch shows the welcome chooser", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Personal cash-flow planning/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Explore demonstration/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Set up new finances/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Continue with Google/i })).toBeVisible();
 });
 
 test("demo mode opens fictional data and disables Google sync", async ({ page }) => {
@@ -23,12 +23,29 @@ test("demo mode opens fictional data and disables Google sync", async ({ page })
 });
 
 test("continue-existing flow validates a Sheet ID before restore", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.google = {
+      accounts: {
+        oauth2: {
+          initTokenClient: (config) => ({
+            requestAccessToken: () => config.callback({ access_token: "mock-token" })
+          })
+        }
+      }
+    };
+  });
+  await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files.*/, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
+  });
   await page.goto("/");
-  await page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i }).click();
+  await page.getByRole("button", { name: /Continue with Google/i }).click();
 
-  await expect(page.getByRole("heading", { name: /Continue from an existing Bluehour Sheet/i })).toBeVisible();
-  await page.getByLabel("Sheet URL or ID").fill("bad");
-  await expect(page.getByRole("button", { name: /Inspect profile/i })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: /Continue with Google/i })).toBeVisible();
+  await page.getByRole("button", { name: /Continue with Google/i }).click();
+  await expect(page.getByText(/could not find an app-accessible Sheet/i)).toBeVisible();
+  await page.getByLabel("Sheet link or ID fallback").fill("bad");
+  await page.getByRole("button", { name: /Inspect profile/i }).click();
+  await expect(page.getByText("Enter a valid Google Sheet URL or spreadsheet ID.")).toBeVisible();
 });
 
 test("live setup starts empty and uses the current setup flow", async ({ page }) => {
