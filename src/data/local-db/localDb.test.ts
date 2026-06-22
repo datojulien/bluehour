@@ -14,6 +14,7 @@ import {
   seedDemoIfNeeded
 } from "./localDb";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
+import { readProfileManifest } from "../../domain/profileManifest";
 
 describe("local IndexedDB repository", () => {
   async function deleteDatabase(name: string): Promise<void> {
@@ -45,6 +46,7 @@ describe("local IndexedDB repository", () => {
     expect(snapshot.planInstances).toHaveLength(0);
     expect(snapshot.subscriptions).toHaveLength(0);
     expect(snapshot.settings.some((setting) => setting.key === "preferences")).toBe(true);
+    expect(readProfileManifest(snapshot.settings)?.lifecycle).toBe("setup");
     expect(snapshot.syncState[0]?.status).toBe("saved_locally");
   });
 

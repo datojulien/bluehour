@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added local-only Budget Coach guidance for first-budget onboarding, the Budgets page, Review, and a restrained dashboard shortfall cue.
+- Added Flexible, Balanced, and Secure coaching profiles with explainable protected-rate adjustment, constrained-budget detection, safety-buffer reservation, and deterministic priority-weight allocation.
+- Added completed-cycle median history, observed/reliable confidence labels, and atomic accept-one or accept-all budget recommendation flows.
+
 ## 1.0.0-rc.1
 
 - Salary-boundary forecast correction: payday is owned by the future salary cycle, the current projected segment ends the day before payday, projected salary is applied once, and cross-cycle buffers are reported per segment instead of being added together as a cash outflow.

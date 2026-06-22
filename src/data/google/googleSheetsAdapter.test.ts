@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createBluehourSpreadsheet,
+  createConnectionDescriptor,
   ensureBluehourSheetSchema,
   extractSpreadsheetId,
   GOOGLE_SHEET_TABS,
@@ -12,6 +13,23 @@ describe("Google Sheets adapter", () => {
   it("extracts a spreadsheet ID from a URL or raw ID", () => {
     expect(extractSpreadsheetId("https://docs.google.com/spreadsheets/d/abc123_DEF/edit")).toBe("abc123_DEF");
     expect(extractSpreadsheetId("raw-id")).toBe("raw-id");
+  });
+
+  it("creates a validated connection descriptor without tokens", () => {
+    const descriptor = createConnectionDescriptor("sheet-1", {
+      profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
+      lastKnownRemoteRevision: 4,
+      lastSuccessfulSyncAt: "2026-06-22T09:42:00.000Z"
+    });
+
+    expect(descriptor).toEqual({
+      spreadsheetId: "sheet-1",
+      sheetSchemaVersion: 3,
+      profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
+      lastKnownRemoteRevision: 4,
+      lastSuccessfulSyncAt: "2026-06-22T09:42:00.000Z"
+    });
+    expect(JSON.stringify(descriptor)).not.toMatch(/access_token|refresh_token|password|email/i);
   });
 
   it("creates a spreadsheet with the Bluehour tabs", async () => {

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
-import { deserializeSnapshotFromSheets, pushSnapshotToGoogleSheet, readSnapshotFromGoogleSheet, serializeSnapshotToSheets } from "./sheetSerialization";
+import {
+  deserializeSnapshotFromSheets,
+  pushSnapshotToGoogleSheet,
+  readSnapshotFromGoogleSheet,
+  RemoteRevisionChangedError,
+  serializeSnapshotToSheets
+} from "./sheetSerialization";
 
 describe("sheet serialization", () => {
   it("serializes domain tables into readable raw rows", () => {
@@ -111,6 +117,38 @@ describe("sheet serialization", () => {
 
     expect(sheet.get("A_Accounts!A1:ZZZ")).toEqual([["id", "name"], ["old", "Old active account"]]);
     expect(sheet.get("Meta!A1:ZZZ")).toContainEqual(["activeSlot", "A"]);
+  });
+
+  it("blocks stale-device pushes when the remote revision changed", async () => {
+    const sheet = new Map<string, unknown[][]>([
+      [
+        "Meta!A1:ZZZ",
+        [
+          ["key", "value"],
+          ["schemaVersion", 3],
+          ["remoteRevision", 11],
+          ["activeSlot", "A"]
+        ]
+      ],
+      ["A_Accounts!A1:ZZZ", [["id", "name"], ["old", "Old active account"]]]
+    ]);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("values:batchGet")) {
+        const valueRanges = url.searchParams.getAll("ranges").map((range) => ({
+          range,
+          values: sheet.get(range) ?? []
+        }));
+        return new Response(JSON.stringify({ valueRanges }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected write ${String(init?.method)}`);
+    });
+
+    await expect(pushSnapshotToGoogleSheet("sheet-1", createDemoSnapshot(), "token", fetcher as unknown as typeof fetch, 12, 10)).rejects.toBeInstanceOf(
+      RemoteRevisionChangedError
+    );
+    expect(sheet.get("A_Accounts!A1:ZZZ")).toEqual([["id", "name"], ["old", "Old active account"]]);
   });
 
   it("rejects staged Google writes when read-back records differ with the same row count", async () => {

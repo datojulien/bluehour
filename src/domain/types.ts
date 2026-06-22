@@ -272,7 +272,7 @@ export interface RecurringRule extends RecordMeta {
 }
 
 export interface AppSettings extends RecordMeta {
-  key: "preferences" | "googleConnection" | "backupStatus" | "onboardingBudgetTemplate";
+  key: "preferences" | "googleConnection" | "backupStatus" | "onboardingBudgetTemplate" | "profileManifest";
   valueJson: string;
 }
 
@@ -308,8 +308,10 @@ export interface SyncState {
     | "failed"
     | "read_only_recovery";
   spreadsheetId?: string;
+  profileId?: string;
   remoteRevision?: number;
   lastSyncedAt?: UtcIsoTimestamp;
+  lastRemoteWriterDeviceId?: string;
   message?: string;
 }
 

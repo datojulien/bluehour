@@ -28,7 +28,7 @@ export async function encryptBackup(snapshot: BluehourSnapshot, passphrase: stri
       snapshot
     })
   );
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toArrayBuffer(nonce) }, key, payload);
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toBufferSource(nonce) }, key, payload);
 
   return {
     version: BACKUP_VERSION,
@@ -50,7 +50,7 @@ export async function decryptBackup(envelope: EncryptedBackupEnvelope, passphras
   const nonce = fromBase64(envelope.nonce);
   const ciphertext = fromBase64(envelope.ciphertext);
   const key = await deriveKey(passphrase, salt);
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toArrayBuffer(nonce) }, key, toArrayBuffer(ciphertext));
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBufferSource(nonce) }, key, toBufferSource(ciphertext));
   const decoded = JSON.parse(new TextDecoder().decode(plaintext)) as { snapshot: BluehourSnapshot };
   return decoded.snapshot;
 }
@@ -61,7 +61,7 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
     {
       name: "PBKDF2",
       hash: "SHA-256",
-      salt: toArrayBuffer(salt),
+      salt: toBufferSource(salt),
       iterations: PBKDF2_ITERATIONS
     },
     material,
@@ -82,6 +82,8 @@ function fromBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+function toBufferSource(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
 }

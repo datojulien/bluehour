@@ -14,12 +14,19 @@ const SettingsPage = lazy(() => import("../features/settings/SettingsPage").then
 const WelcomePage = lazy(() => import("../features/onboarding/WelcomePage").then((module) => ({ default: module.WelcomePage })));
 const OnboardingPage = lazy(() => import("../features/onboarding/OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const RecoveryStatePage = lazy(() => import("../features/recovery/RecoveryStatePage").then((module) => ({ default: module.RecoveryStatePage })));
+const ContinueExistingSheetPage = lazy(() =>
+  import("../features/recovery/ContinueExistingSheetPage").then((module) => ({ default: module.ContinueExistingSheetPage }))
+);
 
 export function App() {
   const { applicationState } = useBluehourData();
 
   if (applicationState === "welcome") {
     return <Suspense fallback={<PageFallback />}><WelcomePage /></Suspense>;
+  }
+
+  if (applicationState === "connect_existing") {
+    return <Suspense fallback={<PageFallback />}><ContinueExistingSheetPage /></Suspense>;
   }
 
   if (applicationState === "setup" || applicationState === "ready_for_salary") {

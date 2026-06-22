@@ -9,12 +9,37 @@ import { calculateCategoryActuals } from "../../domain/transactions/calculations
 import type { BudgetAllocation, BudgetTransfer, Category } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
+import { BudgetCoachPanel } from "./BudgetCoachPanel";
+import {
+  allocationRecordsFromRecommendation,
+  appendBudgetCoachDecision,
+  budgetCoachPreferenceRecord,
+  buildBudgetCoachInputForCycle,
+  readBudgetCoachPreferences
+} from "./budgetCoachSettings";
 
 export function BudgetsPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord } = useBluehourData();
+  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
+  const [coachOpen, setCoachOpen] = useState(false);
 
   const activeCycle = snapshot?.budgetCycles.find((cycle) => cycle.status === "open");
+  const coachPreferences = useMemo(
+    () => (snapshot ? readBudgetCoachPreferences(snapshot.settings, snapshot.categories) : null),
+    [snapshot]
+  );
+  const coachInput = useMemo(
+    () =>
+      snapshot && activeCycle && coachPreferences
+        ? buildBudgetCoachInputForCycle({
+            snapshot,
+            cycle: activeCycle,
+            asOfDate,
+            preferences: coachPreferences
+          })
+        : null,
+    [activeCycle, asOfDate, coachPreferences, snapshot]
+  );
 
   const rows = useMemo(() => {
     if (!snapshot || !activeCycle) {
@@ -74,9 +99,82 @@ export function BudgetsPage() {
             {formatDisplayDate(activeCycle.startedOn)} to {formatDisplayDate(activeCycle.expectedNextSalaryTo)}
           </h1>
         </div>
+        <button className="secondary-action" type="button" onClick={() => setCoachOpen((open) => !open)}>
+          Review with Budget Coach
+        </button>
       </div>
 
       {message ? <section className="alert-band">{message}</section> : null}
+
+      {coachOpen && coachPreferences ? (
+        <BudgetCoachPanel
+          title="Review current salary-cycle budget"
+          input={coachInput}
+          preferences={coachPreferences}
+          categories={snapshot.categories}
+          canApply
+          applyLabel="Accept all recommendations"
+          onPreferencesChange={async (preferences) => {
+            await saveRecords(
+              [{ storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, preferences) }],
+              "Budget Coach preferences"
+            );
+            setMessage("Budget Coach preferences saved.");
+          }}
+          onAcceptAll={async (result, preferences) => {
+            const note = `Accepted Budget Coach ${result.profileId} recommendation with ${result.confidence} confidence.`;
+            const records = allocationRecordsFromRecommendation({
+              cycleId: activeCycle.id,
+              categories: snapshot.categories,
+              existingAllocations: snapshot.budgetAllocations,
+              recommendations: result.categoryRecommendations,
+              note
+            });
+            const acceptedPreferences = appendBudgetCoachDecision({
+              preferences,
+              result,
+              cycleId: activeCycle.id,
+              appliedCategoryIds: result.categoryRecommendations.map((recommendation) => recommendation.categoryId)
+            });
+            await saveRecords(
+              [
+                { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, acceptedPreferences) },
+                ...records.map((record) => ({ storeName: "budgetAllocations" as const, record }))
+              ],
+              "Budget Coach recommendation"
+            );
+            setMessage("Budget Coach recommendations applied atomically.");
+          }}
+          onAcceptCategory={async (categoryId, result, preferences) => {
+            const recommendation = result.categoryRecommendations.find((item) => item.categoryId === categoryId);
+            if (!recommendation) {
+              return;
+            }
+            const note = `Accepted one Budget Coach ${result.profileId} recommendation with ${recommendation.confidence} confidence.`;
+            const records = allocationRecordsFromRecommendation({
+              cycleId: activeCycle.id,
+              categories: snapshot.categories,
+              existingAllocations: snapshot.budgetAllocations,
+              recommendations: [recommendation],
+              note
+            });
+            const acceptedPreferences = appendBudgetCoachDecision({
+              preferences,
+              result,
+              cycleId: activeCycle.id,
+              appliedCategoryIds: [categoryId]
+            });
+            await saveRecords(
+              [
+                { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, acceptedPreferences) },
+                ...records.map((record) => ({ storeName: "budgetAllocations" as const, record }))
+              ],
+              "Budget Coach category recommendation"
+            );
+            setMessage("One Budget Coach recommendation applied. Other categories were not changed.");
+          }}
+        />
+      ) : null}
 
       <BudgetTransferForm
         cycleId={cycle.id}

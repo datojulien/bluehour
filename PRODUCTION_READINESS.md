@@ -8,6 +8,14 @@ Bluehour is prepared as `1.0.0-rc.1` when the automated verification suite below
 
 This is not a stable `1.0.0` release. Real Google OAuth, real private Sheet sync, Safari Add-to-Dock, and GitHub Pages deployment remain manual release gates for stable production use.
 
+## Unreleased Budget Coach Work
+
+Budget Coach has been added in the working tree but is not promoted to `1.0.0-rc.2` until every automated gate passes.
+
+Budget Coach is deterministic, explainable, and local-only. It guides first-cycle onboarding, remains available in Budgets and Review, detects constrained budgets, excludes possible variable income from base budgets, applies Flexible/Balanced/Secure protected-rate profiles, reserves the safety buffer as unallocated cash, and improves confidence with completed-cycle medians.
+
+The local verification attempt on 22/06/2026 passed lint, unit tests, typecheck, build, and Chromium Playwright coverage. Full `npm run test:e2e` could not pass in this host because WebKit browser dependencies are missing and this environment does not provide `sudo` or `apt-get` to install them.
+
 ## Verified Automated Gates
 
 These commands were run locally from a clean dependency install during the RC pass:

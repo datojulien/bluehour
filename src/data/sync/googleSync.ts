@@ -3,6 +3,7 @@ import { BLUEHOUR_SCHEMA_VERSION } from "../google/googleSheetsAdapter";
 import { currentRemoteRevision, type RemoteSheetSnapshot } from "../google/sheetSerialization";
 import { createRecordMeta } from "../../domain/records";
 import type { BluehourSnapshot, ConflictRecord, OutboxOperation, SyncState } from "../../domain/types";
+import { readProfileManifest } from "../../domain/profileManifest";
 
 export const SYNCED_STORES = [
   "accounts",
@@ -29,7 +30,7 @@ export const SYNCED_STORES = [
 export type SyncedStoreName = (typeof SYNCED_STORES)[number];
 
 export interface GoogleSyncPlan {
-  action: "push_local" | "no_op" | "apply_remote" | "conflict" | "read_only_recovery";
+  action: "push_local" | "no_op" | "apply_remote" | "conflict" | "read_only_recovery" | "cross_profile_blocked";
   remoteRevision: number;
   nextRemoteRevision: number;
   mutations: LocalMutation[];
@@ -52,6 +53,20 @@ export function planGoogleSheetSync(local: BluehourSnapshot, remote: RemoteSheet
       [],
       false,
       `Google Sheet schema ${remote.schemaVersion} is newer than this Bluehour build supports.`
+    );
+  }
+
+  const localManifest = safeProfileManifest(local);
+  const remoteManifest = safeProfileManifest(remote.snapshot);
+  if (localManifest && remoteManifest && localManifest.profileId !== remoteManifest.profileId) {
+    return statePlan(
+      "cross_profile_blocked",
+      remote.remoteRevision,
+      localRemoteRevision,
+      [],
+      [],
+      false,
+      "Remote profile ID differs from this local profile. Export a backup, replace explicitly, or cancel."
     );
   }
 
@@ -119,7 +134,11 @@ export function planGoogleSheetSync(local: BluehourSnapshot, remote: RemoteSheet
     mutations,
     [],
     pendingOutbox.length === 0,
-    mutations.length > 0 ? "Remote changes applied locally." : "Remote revision recorded locally."
+    pendingOutbox.length > 0
+      ? "Remote changes applied locally. Local changes are still waiting for an explicit sync."
+      : mutations.length > 0
+        ? "Remote changes applied locally."
+        : "Remote revision recorded locally."
   );
 }
 
@@ -144,18 +163,30 @@ function statePlan(
       status:
         action === "read_only_recovery"
           ? "read_only_recovery"
+          : action === "cross_profile_blocked"
+            ? "failed"
           : action === "conflict"
             ? "conflict"
             : action === "no_op"
               ? "synced"
               : action === "push_local"
                 ? "waiting_to_sync"
-                : "synced",
+                : clearOutbox
+                  ? "synced"
+                  : "waiting_to_sync",
       remoteRevision: action === "push_local" ? nextRemoteRevision : remoteRevision,
       lastSyncedAt: action === "conflict" ? undefined : new Date().toISOString(),
       message
     }
   };
+}
+
+function safeProfileManifest(snapshot: Partial<BluehourSnapshot>) {
+  try {
+    return snapshot.settings ? readProfileManifest(snapshot.settings) : null;
+  } catch {
+    return null;
+  }
 }
 
 function recordsForStore(snapshot: Partial<BluehourSnapshot>, storeName: SyncedStoreName): Array<Record<string, unknown>> {

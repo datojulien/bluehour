@@ -12,6 +12,14 @@ import { calculateCategoryActuals } from "../../domain/transactions/calculations
 import type { BudgetAllocation, BudgetCycle, Category, ImportRowAudit, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
+import { BudgetCoachPanel } from "../budgets/BudgetCoachPanel";
+import {
+  allocationRecordsFromRecommendation,
+  appendBudgetCoachDecision,
+  budgetCoachPreferenceRecord,
+  buildBudgetCoachInputForCycle,
+  readBudgetCoachPreferences
+} from "../budgets/budgetCoachSettings";
 
 interface ChecklistItem {
   id: string;
@@ -29,6 +37,20 @@ export function ReviewPage() {
         ? calculateAccountBalances(snapshot.accounts, snapshot.balanceSnapshots, snapshot.transactions, snapshot.transactionLegs, asOfDate)
         : [],
     [snapshot, asOfDate]
+  );
+  const activeCycle = useMemo(() => snapshot?.budgetCycles.find((cycle) => cycle.status === "open"), [snapshot]);
+  const coachPreferences = useMemo(() => (snapshot ? readBudgetCoachPreferences(snapshot.settings, snapshot.categories) : null), [snapshot]);
+  const coachInput = useMemo(
+    () =>
+      snapshot && activeCycle && coachPreferences
+        ? buildBudgetCoachInputForCycle({
+            snapshot,
+            cycle: activeCycle,
+            asOfDate,
+            preferences: coachPreferences
+          })
+        : null,
+    [activeCycle, asOfDate, coachPreferences, snapshot]
   );
 
   if (loading) {
@@ -48,7 +70,6 @@ export function ReviewPage() {
   const weeklyReview = snapshot.reviewSessions.find((review) => isActive(review) && review.type === "weekly");
   const uncertainImportAudits = snapshot.importRowAudits.filter((audit) => isActive(audit) && audit.outcome === "uncertain");
   const ruleReviews = snapshot.reviewSessions.filter((review) => isActive(review) && review.periodKey.startsWith("rule:") && review.status === "open");
-  const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
   const activeAccounts = snapshot.accounts.filter(isActive);
   const cycleCloseReview = activeCycle
     ? snapshot.reviewSessions.find((review) => isActive(review) && review.type === "cycle_close" && review.periodKey === activeCycle.id)
@@ -345,6 +366,76 @@ export function ReviewPage() {
               "salary cycle close"
             );
             setMessage("Salary cycle closed and the next cycle budget template was created.");
+          }}
+        />
+      ) : null}
+
+      {activeCycle && coachPreferences ? (
+        <BudgetCoachPanel
+          title="Prepare the next cycle"
+          input={coachInput}
+          preferences={coachPreferences}
+          categories={snapshot.categories}
+          canApply
+          applyLabel="Accept all for this open cycle"
+          onPreferencesChange={async (preferences) => {
+            await saveRecords(
+              [{ storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, preferences) }],
+              "Budget Coach preferences"
+            );
+            setMessage("Budget Coach preferences saved.");
+          }}
+          onAcceptAll={async (result, preferences) => {
+            const note = `Accepted cycle-review Budget Coach ${result.profileId} recommendation with ${result.confidence} confidence.`;
+            const records = allocationRecordsFromRecommendation({
+              cycleId: activeCycle.id,
+              categories: snapshot.categories,
+              existingAllocations: snapshot.budgetAllocations,
+              recommendations: result.categoryRecommendations,
+              note
+            });
+            const acceptedPreferences = appendBudgetCoachDecision({
+              preferences,
+              result,
+              cycleId: activeCycle.id,
+              appliedCategoryIds: result.categoryRecommendations.map((recommendation) => recommendation.categoryId)
+            });
+            await saveRecords(
+              [
+                { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, acceptedPreferences) },
+                ...records.map((record) => ({ storeName: "budgetAllocations" as const, record }))
+              ],
+              "cycle-review Budget Coach recommendation"
+            );
+            setMessage("Budget Coach cycle recommendation applied atomically.");
+          }}
+          onAcceptCategory={async (categoryId, result, preferences) => {
+            const recommendation = result.categoryRecommendations.find((item) => item.categoryId === categoryId);
+            if (!recommendation) {
+              return;
+            }
+            const note = `Accepted one cycle-review Budget Coach ${result.profileId} recommendation with ${recommendation.confidence} confidence.`;
+            const records = allocationRecordsFromRecommendation({
+              cycleId: activeCycle.id,
+              categories: snapshot.categories,
+              existingAllocations: snapshot.budgetAllocations,
+              recommendations: [recommendation],
+              note
+            });
+            const acceptedPreferences = appendBudgetCoachDecision({
+              preferences,
+              result,
+              cycleId: activeCycle.id,
+              appliedCategoryIds: [categoryId]
+            });
+            await saveRecords(
+              [
+                { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, snapshot.categories, acceptedPreferences) },
+                ...records.map((record) => ({ storeName: "budgetAllocations" as const, record }))
+              ],
+              "cycle-review Budget Coach category"
+            );
+            setMessage("One cycle-review Budget Coach recommendation applied. Other categories were not changed.");
           }}
         />
       ) : null}

@@ -1,6 +1,20 @@
-# Bluehour 1.0.0-rc.1 Manual Release Checklist
+# Bluehour Release Candidate Manual Checklist
 
 This checklist is release-blocking for stable `1.0.0`. It is not claimed complete for the RC unless each item is manually performed and observed with a real Google account and the deployed app.
+
+## Automated Gate Before `1.0.0-rc.2`
+
+- [ ] `npm ci`
+- [ ] `npm run lint`
+- [ ] `npm test`
+- [ ] `npm run test:coverage`
+- [ ] `npm run typecheck`
+- [ ] `npm run build`
+- [ ] `npm run test:e2e`
+
+Budget Coach work remains unreleased until the full automated gate passes, including Chromium and WebKit browser coverage.
+
+## External Manual Gate Before Stable `1.0.0`
 
 - [ ] Configure `VITE_GOOGLE_CLIENT_ID` in GitHub repository variables.
 - [ ] Configure the authorised JavaScript origin in Google Cloud.

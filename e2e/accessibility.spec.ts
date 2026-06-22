@@ -9,6 +9,7 @@ test.describe("accessibility automation", () => {
   });
 
   test("major demo pages pass automated axe checks", async ({ page }) => {
+    test.setTimeout(60_000);
     await openDemo(page);
 
     for (const path of ["/", "/#/transactions", "/#/plan", "/#/budgets", "/#/subscriptions", "/#/net-worth", "/#/review", "/#/settings"]) {

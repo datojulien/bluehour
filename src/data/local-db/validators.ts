@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { profileManifestSchema } from "../../domain/profileManifest";
 
 const metaSchema = z.object({
   id: z.string().min(1),
@@ -234,10 +235,26 @@ export const recurringRuleSchema = metaSchema.extend({
   active: z.boolean()
 });
 
-export const appSettingsSchema = metaSchema.extend({
-  key: z.enum(["preferences", "googleConnection", "backupStatus", "onboardingBudgetTemplate"]),
-  valueJson: z.string()
-});
+export const appSettingsSchema = metaSchema
+  .extend({
+    key: z.enum(["preferences", "googleConnection", "backupStatus", "onboardingBudgetTemplate", "profileManifest"]),
+    valueJson: z.string()
+  })
+  .superRefine((setting, context) => {
+    if (setting.key !== "profileManifest") {
+      return;
+    }
+
+    try {
+      profileManifestSchema.parse(JSON.parse(setting.valueJson));
+    } catch (caught) {
+      context.addIssue({
+        code: "custom",
+        path: ["valueJson"],
+        message: caught instanceof Error ? caught.message : "Invalid profile manifest"
+      });
+    }
+  });
 
 export const outboxOperationSchema = z.object({
   id: z.string(),
@@ -272,8 +289,10 @@ export const syncStateSchema = z.object({
     "read_only_recovery"
   ]),
   spreadsheetId: z.string().optional(),
+  profileId: z.string().optional(),
   remoteRevision: z.number().int().optional(),
   lastSyncedAt: z.string().optional(),
+  lastRemoteWriterDeviceId: z.string().optional(),
   message: z.string().optional()
 });
 

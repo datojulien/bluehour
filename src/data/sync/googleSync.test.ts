@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
 import type { RemoteSheetSnapshot } from "../google/sheetSerialization";
 import { planGoogleSheetSync } from "./googleSync";
+import { createProfileManifest, profileManifestSettingRecord } from "../../domain/profileManifest";
 
 describe("Google Sheet sync planner", () => {
   it("pushes local data when the remote Sheet is empty", () => {
@@ -90,5 +91,46 @@ describe("Google Sheet sync planner", () => {
 
     expect(plan.action).toBe("read_only_recovery");
     expect(plan.syncState.status).toBe("read_only_recovery");
+  });
+
+  it("blocks automatic sync when profile IDs differ", () => {
+    const localManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
+    const remoteManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
+    const base = createDemoSnapshot();
+    const local = {
+      ...base,
+      settings: [profileManifestSettingRecord([], localManifest)],
+      syncState: [{ key: "google" as const, status: "synced" as const, remoteRevision: 4 }]
+    };
+    const remote: RemoteSheetSnapshot = {
+      remoteRevision: 5,
+      snapshot: {
+        settings: [profileManifestSettingRecord([], remoteManifest)]
+      }
+    };
+    const plan = planGoogleSheetSync(local, remote);
+
+    expect(plan.action).toBe("cross_profile_blocked");
+    expect(plan.syncState.status).toBe("failed");
+  });
+
+  it("permits sync planning when profile IDs match", () => {
+    const manifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
+    const base = createDemoSnapshot();
+    const local = {
+      ...base,
+      settings: [profileManifestSettingRecord([], manifest)],
+      syncState: [{ key: "google" as const, status: "synced" as const, remoteRevision: 4 }]
+    };
+    const remote: RemoteSheetSnapshot = {
+      remoteRevision: 5,
+      snapshot: {
+        accounts: [{ ...base.accounts[0], name: "Remote account" }],
+        settings: [profileManifestSettingRecord([], manifest)]
+      }
+    };
+    const plan = planGoogleSheetSync(local, remote);
+
+    expect(plan.action).toBe("apply_remote");
   });
 });

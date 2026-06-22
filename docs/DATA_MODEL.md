@@ -60,6 +60,34 @@ A fixture version change does not clear mutable profile data. Demo reset is expl
 
 Backups include the full validated `BluehourSnapshot`, including import audit data. Restore decrypts, validates, warns about profile replacement, and replaces the local profile atomically after explicit confirmation.
 
+## Budget Coach Preferences
+
+Budget Coach does not add an IndexedDB store or Google Sheet tab. It stores preferences inside the existing `preferences` setting as typed `budgetCoach` data:
+
+```text
+profileId: flexible | balanced | secure
+essentialPreferences[]
+  categoryId
+  minimumMinor
+  comfortableMinor
+  priority: low | normal | high
+discretionaryPreferences[]
+  categoryId
+  enabled
+  priority: low | normal | high
+acceptedDecisions[]
+  id
+  acceptedAt
+  cycleId?
+  profileId
+  confidence
+  appliedCategoryIds[]
+```
+
+Recommendation results themselves are transient. Accepted category amounts become ordinary `BudgetAllocation` records and retain an approval note. This keeps backup, restore, Google A/B-slot staging, and sync conflict handling on the existing Settings and BudgetAllocations paths without a schema version bump.
+
+Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
+
 ## Import Audit
 
 `ImportRowAudit` records one durable outcome for every normalized CSV row:

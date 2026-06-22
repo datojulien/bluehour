@@ -1,8 +1,15 @@
-import { Database, Landmark } from "lucide-react";
+import { useEffect } from "react";
+import { Database, Landmark, Link } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 
 export function WelcomePage() {
-  const { loading, error, shellState, exploreDemo, startLiveSetup } = useBluehourData();
+  const { loading, error, shellState, exploreDemo, startLiveSetup, startExistingSheetRecovery } = useBluehourData();
+
+  useEffect(() => {
+    if (/^#connect=[a-zA-Z0-9-_]+/.test(window.location.hash)) {
+      void startExistingSheetRecovery();
+    }
+  }, [startExistingSheetRecovery]);
 
   if (loading) {
     return <div className="loading-state full-page-state">Opening Bluehour…</div>;
@@ -38,8 +45,15 @@ export function WelcomePage() {
           <button className="choice-button primary-choice" type="button" onClick={() => void startLiveSetup()}>
             <Landmark size={22} aria-hidden="true" />
             <span>
-              <strong>Set up my finances</strong>
+              <strong>Set up new finances</strong>
               <small>Create an empty live profile with today's local date.</small>
+            </span>
+          </button>
+          <button className="choice-button" type="button" onClick={() => void startExistingSheetRecovery()}>
+            <Link size={22} aria-hidden="true" />
+            <span>
+              <strong>Continue from an existing Bluehour Sheet</strong>
+              <small>Connect Google, preview the private Sheet, then restore this device.</small>
             </span>
           </button>
         </div>

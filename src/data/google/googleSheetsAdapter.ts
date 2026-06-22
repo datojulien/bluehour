@@ -32,7 +32,10 @@ export const GOOGLE_SHEET_TABS = [
 
 export interface ConnectionDescriptor {
   spreadsheetId: string;
-  schemaVersion: number;
+  sheetSchemaVersion: number;
+  profileId: string;
+  lastKnownRemoteRevision: number;
+  lastSuccessfulSyncAt?: string;
 }
 
 interface GoogleApiErrorBody {
@@ -44,10 +47,60 @@ interface GoogleApiErrorBody {
   message?: unknown;
 }
 
-export function createConnectionDescriptor(spreadsheetId: string): ConnectionDescriptor {
+export function createConnectionDescriptor(
+  spreadsheetId: string,
+  {
+    profileId,
+    lastKnownRemoteRevision = 0,
+    lastSuccessfulSyncAt
+  }: {
+    profileId: string;
+    lastKnownRemoteRevision?: number;
+    lastSuccessfulSyncAt?: string;
+  }
+): ConnectionDescriptor {
   return {
     spreadsheetId,
-    schemaVersion: BLUEHOUR_SCHEMA_VERSION
+    sheetSchemaVersion: BLUEHOUR_SCHEMA_VERSION,
+    profileId,
+    lastKnownRemoteRevision,
+    lastSuccessfulSyncAt
+  };
+}
+
+export function parseConnectionDescriptor(value: unknown): ConnectionDescriptor {
+  if (!isRecord(value)) {
+    throw new Error("Google connection descriptor must be an object");
+  }
+
+  const spreadsheetId = stringValue(value.spreadsheetId);
+  const profileId = stringValue(value.profileId);
+  const sheetSchemaVersion = integerValue(value.sheetSchemaVersion ?? value.schemaVersion);
+  const lastKnownRemoteRevision = integerValue(value.lastKnownRemoteRevision ?? 0);
+  const lastSuccessfulSyncAt = stringValue(value.lastSuccessfulSyncAt);
+
+  if (!spreadsheetId) {
+    throw new Error("Google connection descriptor is missing a spreadsheet ID");
+  }
+
+  if (!profileId) {
+    throw new Error("Google connection descriptor is missing a profile ID");
+  }
+
+  if (sheetSchemaVersion === undefined) {
+    throw new Error("Google connection descriptor is missing a Sheet schema version");
+  }
+
+  if (lastKnownRemoteRevision === undefined) {
+    throw new Error("Google connection descriptor has an invalid remote revision");
+  }
+
+  return {
+    spreadsheetId,
+    sheetSchemaVersion,
+    profileId,
+    lastKnownRemoteRevision,
+    lastSuccessfulSyncAt: lastSuccessfulSyncAt ?? undefined
   };
 }
 
@@ -275,6 +328,10 @@ function stringValue(value: unknown): string | null {
 
   const trimmed = collapseWhitespace(value.trim());
   return trimmed || null;
+}
+
+function integerValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

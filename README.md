@@ -162,6 +162,22 @@ Bluehour stores and calculates all MYR values as integer sen. Salary-day project
 
 CSV imports save a durable audit row for every normalized row. Strong duplicates link to existing transactions without creating new ledger records; uncertain matches persist ranked candidate transaction IDs until the user links, creates, or ignores the row.
 
+## Budget Coach
+
+Budget Coach is deterministic, local-only educational budgeting guidance. It does not call an AI, advice API, analytics service, or external financial-data service.
+
+It creates first-cycle recommendations during onboarding and remains available from Budgets and Review. Recommendations use the main salary, known commitments, user-entered essential minimums and comfortable amounts, protected contribution profile, and the active safety-buffer rule. Possible or variable income is excluded from the recurring base budget and shown only as separate scenario context.
+
+Profiles are:
+
+- **Flexible:** at least 10% protected, or the user's configured higher minimum.
+- **Balanced:** at least 15% protected when affordable.
+- **Secure:** at least 20% protected when affordable.
+
+If a profile target does not fit, Budget Coach may recommend the highest affordable protected amount down to the configured minimum and explains the adjustment. If the configured minimum also does not fit, it shows the real shortfall and keeps safe-to-spend at RM0.00 until the user explicitly accepts a constrained plan.
+
+Priority weights are Low 1, Normal 2, High 3. Essential categories are funded from minimum toward comfortable amounts before discretionary categories receive any pool. Completed salary cycles improve confidence from Estimated to Observed, then Reliable after three or more completed cycles.
+
 ## Backup And Restore
 
 Settings can create encrypted JSON backups with Web Crypto. The passphrase is never stored. Restore validates the backup, warns when profile types differ, and replaces the current local profile atomically after explicit confirmation.

@@ -25,6 +25,7 @@ import type {
   TransactionSplit
 } from "../../domain/types";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
+import { createProfileManifest, profileManifestSettingRecord } from "../../domain/profileManifest";
 import {
   accountSchema,
   balanceSnapshotSchema,
@@ -260,16 +261,18 @@ export async function resetDemoProfile(): Promise<void> {
 export async function initializeLiveProfile(): Promise<void> {
   const db = await openBluehourDb("live");
   const existingSyncState = await db.get("syncState", "google");
-  const existingPreferences = (await db.getAll("settings")).find((setting) => setting.key === "preferences");
+  const existingSettings = await db.getAll("settings");
+  const existingPreferences = existingSettings.find((setting) => setting.key === "preferences" && !setting.archivedAt);
+  const existingManifest = existingSettings.find((setting) => setting.key === "profileManifest" && !setting.archivedAt);
 
-  if (existingSyncState && existingPreferences) {
+  if (existingSyncState && existingPreferences && existingManifest) {
     db.close();
     return;
   }
 
+  const now = new Date().toISOString();
   const tx = db.transaction(["settings", "syncState", "meta"], "readwrite");
   if (!existingPreferences) {
-    const now = new Date().toISOString();
     await tx.objectStore("settings").put({
       id: "settings-preferences-live",
       key: "preferences",
@@ -290,6 +293,18 @@ export async function initializeLiveProfile(): Promise<void> {
       archivedAt: null,
       revision: 1
     } satisfies AppSettings);
+  }
+
+  if (!existingManifest) {
+    await tx.objectStore("settings").put(
+      profileManifestSettingRecord(
+        existingSettings,
+        createProfileManifest({
+          now,
+          appVersion: __BLUEHOUR_VERSION__
+        })
+      )
+    );
   }
 
   if (!existingSyncState) {

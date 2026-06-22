@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
 import { decryptBackup, encryptBackup } from "./encryptedBackup";
+import { createProfileManifest, profileManifestSettingRecord, readProfileManifest } from "../../domain/profileManifest";
 
 describe("encrypted backup", () => {
   it("round-trips a Bluehour snapshot with a passphrase", async () => {
     const snapshot = {
       ...createDemoSnapshot(),
+      settings: [
+        ...createDemoSnapshot().settings,
+        profileManifestSettingRecord(
+          [],
+          createProfileManifest({
+            now: "2026-06-22T09:42:00.000Z",
+            appVersion: "1.0.0-rc.1",
+            lifecycle: "live"
+          })
+        )
+      ],
       importRowAudits: [
         {
           id: "audit-backup",
@@ -36,6 +48,7 @@ describe("encrypted backup", () => {
     expect(restored.accounts.length).toBe(snapshot.accounts.length);
     expect(restored.transactions.length).toBe(snapshot.transactions.length);
     expect(restored.importRowAudits).toHaveLength(1);
+    expect(readProfileManifest(restored.settings)?.lifecycle).toBe("live");
   });
 
   it("rejects short passphrases", async () => {

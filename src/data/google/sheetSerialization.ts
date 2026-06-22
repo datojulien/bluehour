@@ -1,4 +1,5 @@
 import type { BluehourSnapshot } from "../../domain/types";
+import { readProfileManifest } from "../../domain/profileManifest";
 import { syncedStoreSchemas } from "../local-db/validators";
 import {
   BLUEHOUR_SCHEMA_VERSION,
@@ -18,6 +19,18 @@ export interface RemoteSheetSnapshot {
   schemaVersion?: number;
   activeSlot?: GoogleSheetSlot;
   exportedAt?: string;
+  committedAt?: string;
+  lastWrittenByDeviceId?: string;
+}
+
+export class RemoteRevisionChangedError extends Error {
+  constructor(
+    readonly expectedRemoteRevision: number,
+    readonly actualRemoteRevision: number
+  ) {
+    super(`remote_revision_changed: expected remote revision ${expectedRemoteRevision}, found ${actualRemoteRevision}`);
+    this.name = "RemoteRevisionChangedError";
+  }
 }
 
 const STORE_BY_TAB = {
@@ -57,7 +70,7 @@ const JSON_STRING_COLUMNS = new Set([
 
 export function serializeSnapshotToSheets(snapshot: BluehourSnapshot, remoteRevision = currentRemoteRevision(snapshot) + 1): SheetPayload {
   return {
-    Meta: metaRows({ remoteRevision, schemaVersion: BLUEHOUR_SCHEMA_VERSION }),
+    Meta: metaRows({ remoteRevision, schemaVersion: BLUEHOUR_SCHEMA_VERSION, lastWrittenByDeviceId: lastWrittenByDeviceId(snapshot) }),
     ...domainRows(snapshot)
   };
 }
@@ -76,10 +89,15 @@ export async function pushSnapshotToGoogleSheet(
   snapshot: BluehourSnapshot,
   accessToken: string,
   fetcher: typeof fetch = fetch,
-  remoteRevision = currentRemoteRevision(snapshot) + 1
+  remoteRevision = currentRemoteRevision(snapshot) + 1,
+  expectedRemoteRevision?: number
 ): Promise<void> {
   const currentMetaPayload = await readSheetRanges(spreadsheetId, ["Meta!A1:ZZZ"], accessToken, fetcher);
   const currentMeta = keyValueRows(currentMetaPayload.Meta ?? []);
+  const actualRemoteRevision = numberFromUnknown(currentMeta.remoteRevision) ?? 0;
+  if (expectedRemoteRevision !== undefined && actualRemoteRevision !== expectedRemoteRevision) {
+    throw new RemoteRevisionChangedError(expectedRemoteRevision, actualRemoteRevision);
+  }
   const activeSlot = parseSlot(currentMeta.activeSlot) ?? "A";
   const inactiveSlot = activeSlot === "A" ? "B" : "A";
   const payload = serializeSnapshotToSlot(snapshot, inactiveSlot);
@@ -100,7 +118,8 @@ export async function pushSnapshotToGoogleSheet(
       activeSlot: inactiveSlot,
       remoteRevision,
       schemaVersion: BLUEHOUR_SCHEMA_VERSION,
-      committedAt: new Date().toISOString()
+      committedAt: new Date().toISOString(),
+      lastWrittenByDeviceId: lastWrittenByDeviceId(snapshot)
     }),
     accessToken,
     fetcher
@@ -148,6 +167,8 @@ export function deserializeSnapshotFromSheets(payload: SheetPayload): RemoteShee
     schemaVersion: numberFromUnknown(meta.schemaVersion) ?? 1,
     activeSlot,
     exportedAt: typeof meta.exportedAt === "string" ? meta.exportedAt : typeof meta.committedAt === "string" ? meta.committedAt : undefined,
+    committedAt: typeof meta.committedAt === "string" ? meta.committedAt : undefined,
+    lastWrittenByDeviceId: typeof meta.lastWrittenByDeviceId === "string" ? meta.lastWrittenByDeviceId : undefined,
     snapshot
   };
 }
@@ -166,12 +187,14 @@ function metaRows({
   activeSlot,
   remoteRevision,
   schemaVersion,
-  committedAt
+  committedAt,
+  lastWrittenByDeviceId
 }: {
   activeSlot?: GoogleSheetSlot;
   remoteRevision: number;
   schemaVersion: number;
   committedAt?: string;
+  lastWrittenByDeviceId?: string;
 }): unknown[][] {
   const rows: unknown[][] = [
     ["key", "value"],
@@ -184,7 +207,19 @@ function metaRows({
     rows.push(["activeSlot", activeSlot], ["committedAt", committedAt]);
   }
 
+  if (lastWrittenByDeviceId) {
+    rows.push(["lastWrittenByDeviceId", lastWrittenByDeviceId]);
+  }
+
   return rows;
+}
+
+function lastWrittenByDeviceId(snapshot: BluehourSnapshot): string | undefined {
+  try {
+    return readProfileManifest(snapshot.settings)?.lastWrittenByDeviceId;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowsFor(records: readonly object[]): unknown[][] {

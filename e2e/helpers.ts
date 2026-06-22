@@ -8,7 +8,7 @@ export async function openDemo(page: Page) {
 
 export async function completeLiveOnboarding(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Set up my finances/i }).click();
+  await page.getByRole("button", { name: /Set up new finances/i }).click();
   await page.getByRole("button", { name: /Defer Google for now/i }).click();
   await page.getByRole("button", { name: /Save preferences/i }).click();
 
@@ -17,10 +17,15 @@ export async function completeLiveOnboarding(page: Page) {
   await page.getByLabel("Institution label").fill("Test Bank");
   await page.getByRole("button", { name: /Save and continue/i }).click();
 
+  await page.getByLabel("Amount").fill("7800.00");
+  await page.getByRole("button", { name: /Save income/i }).click();
+  await expect(page.getByRole("heading", { name: "Obligations", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Skip for now/i }).click();
-  await page.getByRole("button", { name: /Skip for now/i }).click();
-  await page.getByRole("button", { name: /Save budget template/i }).click();
+  await expect(page.getByRole("heading", { name: "Budget", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Accept suggested budget/i }).click();
+  await expect(page.getByRole("heading", { name: "Wait salary", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Salary has arrived/i }).click();
+  await expect(page.getByRole("heading", { name: "Start cycle", exact: true })).toBeVisible();
 
   await page.getByLabel("Salary deposit").fill("7800.00");
   await page.getByLabel("Current balance").fill("9000.00");

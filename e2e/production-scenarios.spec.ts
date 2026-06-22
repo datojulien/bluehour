@@ -13,7 +13,8 @@ test.describe("production readiness scenarios", () => {
 
     await expect(page.getByRole("heading", { name: /Personal cash-flow planning/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Explore demonstration/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Set up my finances/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Set up new finances/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i })).toBeVisible();
   });
 
   test("2. demo mode contains fictional records", async ({ page }) => {
@@ -26,9 +27,10 @@ test.describe("production readiness scenarios", () => {
 
   test("3. live setup contains no fictional records", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Set up my finances/i }).click();
+    await page.getByRole("button", { name: /Set up new finances/i }).click();
 
     await expect(page.getByText("Live setup")).toBeVisible();
+    await expect(page.getByText(/Saved on this device only/i)).toBeVisible();
     await expect(page.getByText(/Vista Heights|Banyan Market|Orchid Stream/)).toHaveCount(0);
   });
 
@@ -54,7 +56,7 @@ test.describe("production readiness scenarios", () => {
 
   test("6. current live date comes from the browser-local clock", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Set up my finances/i }).click();
+    await page.getByRole("button", { name: /Set up new finances/i }).click();
     const expected = await page.evaluate(() => new Intl.DateTimeFormat("en-GB").format(new Date()));
 
     await expect(page.getByText(`Today ${expected}`)).toBeVisible();
@@ -355,6 +357,79 @@ test.describe("production readiness scenarios", () => {
     await page.getByRole("button", { name: /Create Sheet/i }).click();
 
     await expect(page.getByText(/Google Sheet created/i)).toBeVisible();
+  });
+
+  test("31. continue existing Sheet shows a remote profile preview", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.google = {
+        accounts: {
+          oauth2: {
+            initTokenClient: (config) => ({
+              requestAccessToken: () => config.callback({ access_token: "mock-token" })
+            })
+          }
+        }
+      };
+    });
+    await page.route("https://sheets.googleapis.com/v4/spreadsheets/mockExistingSheet?fields=sheets.properties.title", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          sheets: ["Meta", "A_Settings", "A_Accounts"].map((title) => ({ properties: { title } }))
+        })
+      });
+    });
+    await page.route(/https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/mockExistingSheet\/values:batchGet.*/, async (route) => {
+      const url = new URL(route.request().url());
+      const ranges = url.searchParams.getAll("ranges");
+      const manifest = {
+        manifestVersion: 1,
+        profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
+        profileName: "Personal finances",
+        currency: "MYR",
+        lifecycle: "setup",
+        onboardingStep: "budget",
+        createdAt: "2026-06-22T09:42:00.000Z",
+        updatedAt: "2026-06-22T09:42:00.000Z",
+        createdByAppVersion: "1.0.0-rc.1"
+      };
+      const valuesFor = (range: string) => {
+        if (range === "Meta!A1:ZZZ") {
+          return [
+            ["key", "value"],
+            ["schemaVersion", 3],
+            ["remoteRevision", 14],
+            ["activeSlot", "A"],
+            ["committedAt", "2026-06-22T09:42:00.000Z"]
+          ];
+        }
+        if (range === "A_Settings!A1:ZZZ") {
+          return [
+            ["archivedAt", "createdAt", "id", "key", "revision", "updatedAt", "valueJson"],
+            [null, "2026-06-22T09:42:00.000Z", "settings-manifest", "profileManifest", 1, "2026-06-22T09:42:00.000Z", JSON.stringify(manifest)]
+          ];
+        }
+        return [["id"]];
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          valueRanges: ranges.map((range) => ({ range, values: valuesFor(range) }))
+        })
+      });
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: /Continue from an existing Bluehour Sheet/i }).click();
+    await page.getByRole("button", { name: /Connect Google/i }).click();
+    await page.getByLabel("Sheet URL or ID").fill("mockExistingSheet");
+    await page.getByRole("button", { name: /Inspect profile/i }).click();
+
+    await expect(page.getByText("Remote profile inspected. No data was written to the Sheet or this device.")).toBeVisible();
+    await expect(page.getByLabel("Remote profile preview").getByText("Personal finances")).toBeVisible();
+    await expect(page.getByText(/Remote revision/i)).toBeVisible();
   });
 
   test("22. encrypted backup and restore", async ({ page }) => {

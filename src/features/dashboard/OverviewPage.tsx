@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, CalendarClock, ChevronRight, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
+import { recommendBudget } from "../../domain/budgets/budgetCoach";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
 import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
 import type { SafeToSpendPeriod, SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
@@ -10,6 +11,7 @@ import { Amount } from "../../ui/Amount";
 import { BreakdownDrawer } from "./BreakdownDrawer";
 import { buildBudgetRows } from "./budgetRows";
 import { buildDailyTimeline, buildDashboardModel } from "./dashboardModel";
+import { buildBudgetCoachInputForCycle, readBudgetCoachPreferences } from "../budgets/budgetCoachSettings";
 
 const periodOrder: SafeToSpendPeriod[] = ["untilSalary", "thisMonth", "next30Days"];
 
@@ -19,6 +21,30 @@ export function OverviewPage() {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   const model = useMemo(() => (snapshot ? buildDashboardModel(snapshot, asOfDate) : null), [snapshot, asOfDate]);
+  const coachCue = useMemo(() => {
+    if (!snapshot) {
+      return null;
+    }
+
+    const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
+    if (!activeCycle) {
+      return null;
+    }
+
+    try {
+      const preferences = readBudgetCoachPreferences(snapshot.settings, snapshot.categories);
+      return recommendBudget(
+        buildBudgetCoachInputForCycle({
+          snapshot,
+          cycle: activeCycle,
+          asOfDate,
+          preferences
+        })
+      );
+    } catch {
+      return null;
+    }
+  }, [asOfDate, snapshot]);
 
   if (loading) {
     return <div className="loading-state">Opening local profile data...</div>;
@@ -118,6 +144,18 @@ export function OverviewPage() {
           <span>Protected contribution is complete for this cycle.</span>
         </section>
       )}
+
+      {coachCue && !coachCue.feasible ? (
+        <section className="alert-band danger">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span>
+            Budget Coach sees a planning shortfall of <Amount value={coachCue.shortfallMinor} /> before discretionary spending.
+          </span>
+          <a className="secondary-action" href="#/budgets">
+            Review with Budget Coach
+          </a>
+        </section>
+      ) : null}
 
       <section className="dashboard-band">
         <div className="band-header">

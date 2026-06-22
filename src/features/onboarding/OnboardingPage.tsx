@@ -2,7 +2,8 @@ import { CheckCircle2, Circle, KeyRound, Landmark, Plus } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
-import { createBluehourSpreadsheet, createConnectionDescriptor } from "../../data/google/googleSheetsAdapter";
+import { createBluehourSpreadsheet, createConnectionDescriptor, ensureBluehourSheetSchema, parseConnectionDescriptor } from "../../data/google/googleSheetsAdapter";
+import { pushSnapshotToGoogleSheet } from "../../data/google/sheetSerialization";
 import { createStarterCategories } from "../../domain/categories/starterCategories";
 import { formatDisplayDate } from "../../domain/dates";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
@@ -10,6 +11,15 @@ import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
 import type { Account, AppSettings, BalanceSnapshot, BudgetAllocation, Category, PlanInstance } from "../../domain/types";
 import { isActive } from "../../domain/types";
+import { readProfileManifest } from "../../domain/profileManifest";
+import { BudgetCoachPanel } from "../budgets/BudgetCoachPanel";
+import {
+  appendBudgetCoachDecision,
+  budgetCoachPreferenceRecord,
+  onboardingBudgetCoachInput,
+  readBudgetCoachPreferences,
+  recommendedProfileForOnboarding
+} from "../budgets/budgetCoachSettings";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -25,13 +35,17 @@ const steps = [
 ] as const;
 
 export function OnboardingPage() {
-  const { snapshot, shellState, asOfDate, clock, loading, error, setOnboardingStep, saveRecords, enterLiveMode, returnToWelcome } =
+  const { snapshot, shellState, asOfDate, clock, loading, error, setOnboardingStep, saveRecords, saveRecordsAndAdvanceOnboarding, markSynced, returnToWelcome } =
     useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
   const currentStep = shellState?.onboardingStep === "welcome" ? "google" : shellState?.onboardingStep ?? "google";
   const currentIndex = steps.findIndex((step) => step.id === currentStep);
   const accounts = useMemo(() => snapshot?.accounts.filter(isActive) ?? [], [snapshot]);
   const categories = useMemo(() => snapshot?.categories.filter((category) => isActive(category) && category.active) ?? [], [snapshot]);
+  const budgetCoachPreferences = useMemo(() => {
+    const stored = readBudgetCoachPreferences(snapshot?.settings ?? [], categories);
+    return snapshot ? recommendedProfileForOnboarding(snapshot, asOfDate, stored) : stored;
+  }, [asOfDate, categories, snapshot]);
 
   if (loading) {
     return <div className="loading-state full-page-state">Opening live setup...</div>;
@@ -41,7 +55,7 @@ export function OnboardingPage() {
     return (
       <main className="welcome-screen">
         <section className="empty-state">
-          <h1>Set up my finances</h1>
+          <h1>Set up new finances</h1>
           <p>{error ?? "Live setup is unavailable."}</p>
           <button className="secondary-action" type="button" onClick={() => void returnToWelcome()}>
             Return to welcome
@@ -69,8 +83,7 @@ export function OnboardingPage() {
         ? createStarterCategories(now).map((record) => ({ storeName: "categories" as const, record }))
         : [];
 
-    await saveRecords([{ storeName: "settings", record: preferences }, ...categoryMutations], "onboarding preferences");
-    await setOnboardingStep("accounts");
+    await saveRecordsAndAdvanceOnboarding([{ storeName: "settings", record: preferences }, ...categoryMutations], "accounts", "setup", "onboarding preferences");
     setMessage("Preferences saved and starter categories are ready.");
   }
 
@@ -87,7 +100,11 @@ export function OnboardingPage() {
     try {
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
       const spreadsheetId = await createBluehourSpreadsheet(token);
-      const descriptor = createConnectionDescriptor(spreadsheetId);
+      const manifest = snapshot ? readProfileManifest(snapshot.settings) : null;
+      if (!manifest) {
+        throw new Error("Profile manifest is not ready yet");
+      }
+      const descriptor = createConnectionDescriptor(spreadsheetId, { profileId: manifest.profileId });
       const existing = snapshot?.settings.find((setting) => setting.key === "googleConnection");
       const setting: AppSettings = existing
         ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
@@ -97,9 +114,41 @@ export function OnboardingPage() {
             valueJson: JSON.stringify(descriptor)
           };
 
-      await saveRecords([{ storeName: "settings", record: setting }], "Google connection");
-      await setOnboardingStep("preferences");
-      setMessage("Google Sheet created. The access token was cleared from memory after setup.");
+      await saveRecordsAndAdvanceOnboarding([{ storeName: "settings", record: setting }], "preferences", "setup", "Google connection");
+      setMessage("Google Sheet created. Use Save progress to Google when you want this setup available on another device.");
+    } finally {
+      clearInMemoryGoogleAccessToken();
+    }
+  }
+
+  async function saveProgressToGoogle() {
+    if (!snapshot) {
+      throw new Error("Bluehour data has not loaded yet");
+    }
+    if (!GOOGLE_CLIENT_ID) {
+      throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Sheets");
+    }
+    const connection = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
+    if (!connection) {
+      throw new Error("Connect Google before saving progress to the Sheet");
+    }
+    const descriptor = parseConnectionDescriptor(JSON.parse(connection.valueJson));
+    const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+    try {
+      const expectedRemoteRevision = snapshot.syncState.find((state) => state.key === "google")?.remoteRevision ?? descriptor.lastKnownRemoteRevision;
+      const nextRemoteRevision = expectedRemoteRevision + 1;
+      await ensureBluehourSheetSchema(descriptor.spreadsheetId, token);
+      await pushSnapshotToGoogleSheet(descriptor.spreadsheetId, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
+      await markSynced({
+        key: "google",
+        status: "synced",
+        spreadsheetId: descriptor.spreadsheetId,
+        profileId: descriptor.profileId,
+        remoteRevision: nextRemoteRevision,
+        lastSyncedAt: new Date().toISOString(),
+        message: "Saved to Google. This progress is available on your other devices."
+      });
+      setMessage("Saved to Google. This progress is available on your other devices.");
     } finally {
       clearInMemoryGoogleAccessToken();
     }
@@ -143,6 +192,8 @@ export function OnboardingPage() {
 
         {message ? <div className="alert-band">{message}</div> : null}
 
+        <OnboardingCheckpointStatus snapshot={snapshot} onSaveProgress={() => void saveProgressToGoogle()} onEnableRecovery={() => void setOnboardingStep("google")} />
+
         {currentStep === "google" ? (
           <GoogleOnboardingPanel
             hasClientId={Boolean(GOOGLE_CLIENT_ID)}
@@ -160,14 +211,15 @@ export function OnboardingPage() {
             date={asOfDate}
             accounts={accounts}
             onSave={async (records) => {
-              await saveRecords(
+              await saveRecordsAndAdvanceOnboarding(
                 [
                   { storeName: "accounts", record: records.account },
                   { storeName: "balanceSnapshots", record: records.balanceSnapshot }
                 ],
+                "income",
+                "setup",
                 "onboarding account"
               );
-              await setOnboardingStep("income");
               setMessage("Account saved without account numbers.");
             }}
           />
@@ -179,8 +231,7 @@ export function OnboardingPage() {
             incomeCategoryId={categories.find((category) => category.id === "cat-income")?.id ?? "cat-income"}
             onSkip={() => void markStepDone("obligations")}
             onSave={async (plan) => {
-              await saveRecords([{ storeName: "planInstances", record: plan }], "onboarding income");
-              await setOnboardingStep("obligations");
+              await saveRecordsAndAdvanceOnboarding([{ storeName: "planInstances", record: plan }], "obligations", "setup", "onboarding income");
               setMessage("Income plan saved.");
             }}
           />
@@ -192,22 +243,49 @@ export function OnboardingPage() {
             categories={categories}
             onSkip={() => void markStepDone("budget")}
             onSave={async (plan) => {
-              await saveRecords([{ storeName: "planInstances", record: plan }], "onboarding obligation");
-              await setOnboardingStep("budget");
+              await saveRecordsAndAdvanceOnboarding([{ storeName: "planInstances", record: plan }], "budget", "setup", "onboarding obligation");
               setMessage("Obligation saved.");
             }}
           />
         ) : null}
 
         {currentStep === "budget" ? (
-          <BudgetTemplateForm
+          <BudgetCoachPanel
+            title="Guided first salary-cycle budget"
+            input={onboardingBudgetCoachInput(snapshot, asOfDate, budgetCoachPreferences)}
             categories={categories}
-            existing={budgetTemplateFromSettings(snapshot.settings)}
-            existingSetting={snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")}
-            onSave={async (setting) => {
-              await saveRecords([{ storeName: "settings", record: setting }], "onboarding budget template");
-              await setOnboardingStep("wait_salary");
-              setMessage("Budget template saved for the first salary cycle.");
+            preferences={budgetCoachPreferences}
+            canApply
+            applyLabel="Accept suggested budget"
+            onReturnToIncome={() => void setOnboardingStep("income")}
+            onReturnToObligations={() => void setOnboardingStep("obligations")}
+            onPreferencesChange={async (preferences) => {
+              await saveRecords(
+                [{ storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, preferences) }],
+                "Budget Coach preferences"
+              );
+              setMessage("Budget Coach preferences saved.");
+            }}
+            onAcceptAll={async (result, preferences) => {
+              const acceptedPreferences = appendBudgetCoachDecision({
+                preferences,
+                result,
+                appliedCategoryIds: result.categoryRecommendations.map((recommendation) => recommendation.categoryId)
+              });
+              const template = budgetTemplateSettingFromRecommendation(
+                result.categoryRecommendations,
+                snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")
+              );
+              await saveRecordsAndAdvanceOnboarding(
+                [
+                  { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, acceptedPreferences) },
+                  { storeName: "settings", record: template }
+                ],
+                "wait_salary",
+                "setup",
+                "onboarding budget coach"
+              );
+              setMessage("Budget Coach saved the accepted first-cycle template.");
             }}
           />
         ) : null}
@@ -237,7 +315,7 @@ export function OnboardingPage() {
                   archivedAt: clock.now(),
                   note: record.note ? `${record.note} Archived when the first salary boundary was created.` : "Archived when the first salary boundary was created."
                 }));
-              await saveRecords(
+              await saveRecordsAndAdvanceOnboarding(
                 [
                   ...archivedDestinationSetupSnapshots.map((record) => ({ storeName: "balanceSnapshots" as const, record })),
                   { storeName: "balanceSnapshots", record: records.openingSnapshot },
@@ -247,9 +325,10 @@ export function OnboardingPage() {
                   { storeName: "budgetCycles", record: records.cycle },
                   ...firstCycleAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record }))
                 ],
+                "start_cycle",
+                "live",
                 "first salary cycle"
               );
-              await enterLiveMode();
             }}
           />
         ) : null}
@@ -306,6 +385,50 @@ function GoogleOnboardingPanel({
         </div>
         {status ? <p className="form-note danger-text">{status}</p> : null}
       </div>
+    </section>
+  );
+}
+
+function OnboardingCheckpointStatus({
+  snapshot,
+  onSaveProgress,
+  onEnableRecovery
+}: {
+  snapshot: NonNullable<ReturnType<typeof useBluehourData>["snapshot"]>;
+  onSaveProgress: () => void;
+  onEnableRecovery: () => void;
+}) {
+  const syncState = snapshot.syncState.find((state) => state.key === "google");
+  const connection = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
+  const pendingChanges = snapshot.outboxOperations.length;
+  const statusText =
+    syncState?.status === "synced"
+      ? "Saved to Google. Available on your other devices."
+      : connection
+        ? pendingChanges > 0
+          ? `${pendingChanges} changes waiting to sync.`
+          : "Saved on this device. Reconnect Google to make this progress available elsewhere."
+        : "Saved on this device only.";
+
+  return (
+    <section className="checkpoint-strip" aria-label="Cross-device recovery status">
+      <div>
+        <strong>{statusText}</strong>
+        <small>
+          {connection
+            ? "Use the same hosted Bluehour app and a Google account with access to this Sheet on the other device."
+            : "Enable cross-device recovery before expecting another device to continue this setup."}
+        </small>
+      </div>
+      {connection ? (
+        <button className="secondary-action" type="button" onClick={onSaveProgress}>
+          Save progress to Google
+        </button>
+      ) : (
+        <button className="secondary-action" type="button" onClick={onEnableRecovery}>
+          Enable cross-device recovery
+        </button>
+      )}
     </section>
   );
 }
@@ -607,78 +730,6 @@ function ObligationSetupForm({
   );
 }
 
-function BudgetTemplateForm({
-  categories,
-  existing,
-  existingSetting,
-  onSave
-}: {
-  categories: Category[];
-  existing: BudgetTemplate;
-  existingSetting?: AppSettings;
-  onSave: (setting: AppSettings) => Promise<void>;
-}) {
-  const budgetCategories = categories.filter((category) => category.nature !== "administrative" && category.nature !== "protected" && category.reservationMode !== "plan");
-  const existingByCategory = new Map(existing.allocations.map((allocation) => [allocation.categoryId, allocation.amountMinor]));
-  const [amounts, setAmounts] = useState<Record<string, string>>(
-    Object.fromEntries(budgetCategories.map((category) => [category.id, ((existingByCategory.get(category.id) ?? 0) / 100).toFixed(2)]))
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    try {
-      const allocations = budgetCategories
-        .map((category) => ({
-          categoryId: category.id,
-          amountMinor: parseMoneyInput(amounts[category.id] ?? "0")
-        }))
-        .filter((allocation) => allocation.amountMinor > 0);
-      const setting: AppSettings = existingSetting
-        ? { ...touchRecord(existingSetting), valueJson: JSON.stringify({ allocations } satisfies BudgetTemplate) }
-        : {
-            ...createRecordMeta("settings"),
-            key: "onboardingBudgetTemplate",
-            valueJson: JSON.stringify({ allocations } satisfies BudgetTemplate)
-          };
-      await onSave(setting);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save budget template");
-    }
-  }
-
-  return (
-    <section className="dashboard-band">
-      <div className="band-header">
-        <div>
-          <p className="eyebrow">Live profile</p>
-          <h2>Guided first budget</h2>
-        </div>
-      </div>
-      <form className="form-grid" onSubmit={submit}>
-        {budgetCategories.map((category) => (
-          <label key={category.id}>
-            {category.name}
-            <input
-              inputMode="decimal"
-              value={amounts[category.id] ?? "0.00"}
-              onChange={(event) => setAmounts((current) => ({ ...current, [category.id]: event.target.value }))}
-            />
-          </label>
-        ))}
-        <p className="form-note span-3">These become the first cycle allocations when salary arrives. You can revise them after observing the first cycles.</p>
-        {error ? <p className="form-error span-3">{error}</p> : null}
-        <div className="form-actions span-3">
-          <button className="primary-action" type="submit">
-            Save budget template
-          </button>
-        </div>
-      </form>
-    </section>
-  );
-}
-
 function SetupPanel({
   title,
   actionLabel,
@@ -918,6 +969,30 @@ function budgetTemplateFromSettings(settings: readonly AppSettings[]): BudgetTem
   } catch {
     return { allocations: [] };
   }
+}
+
+function budgetTemplateSettingFromRecommendation(
+  recommendations: readonly { categoryId: string; suggestedAmountMinor: number }[],
+  existingSetting?: AppSettings
+): AppSettings {
+  const allocations = recommendations
+    .filter((recommendation) => recommendation.suggestedAmountMinor > 0)
+    .map((recommendation) => ({
+      categoryId: recommendation.categoryId,
+      amountMinor: recommendation.suggestedAmountMinor
+    }));
+  const valueJson = JSON.stringify({ allocations } satisfies BudgetTemplate);
+
+  return existingSetting
+    ? {
+        ...touchRecord(existingSetting),
+        valueJson
+      }
+    : {
+        ...createRecordMeta("settings"),
+        key: "onboardingBudgetTemplate",
+        valueJson
+      };
 }
 
 function allocationsFromBudgetTemplate(cycleId: string, settings: readonly AppSettings[]): BudgetAllocation[] {
