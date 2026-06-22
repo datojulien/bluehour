@@ -5,6 +5,7 @@ import type { Account } from "../../domain/types";
 import {
   LEGACY_DB_NAME,
   PROFILE_DB_NAMES,
+  INDEXED_DB_SCHEMA_VERSION,
   loadDemoSnapshot,
   loadLiveSnapshot,
   putLocalRecords,
@@ -111,5 +112,57 @@ describe("local IndexedDB repository", () => {
     await expect(replaceProfileSnapshot("live", invalid)).rejects.toThrow();
     const live = await loadLiveSnapshot();
     expect(live.accounts.map((record) => record.name)).toEqual(["Keep me"]);
+  });
+
+  it("upgrades a previous profile database by adding import audit storage without clearing records", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    const oldStores = [
+      "accounts",
+      "balanceSnapshots",
+      "transactions",
+      "transactionLegs",
+      "transactionSplits",
+      "categories",
+      "budgetCycles",
+      "budgetAllocations",
+      "budgetTransfers",
+      "recurringRules",
+      "planInstances",
+      "subscriptions",
+      "categorisationRules",
+      "importProfiles",
+      "importBatches",
+      "reconciliations",
+      "reviewSessions",
+      "settings",
+      "outboxOperations",
+      "conflicts",
+      "syncState",
+      "meta"
+    ];
+    const oldDb = await openDB(PROFILE_DB_NAMES.live, INDEXED_DB_SCHEMA_VERSION - 1, {
+      upgrade(db) {
+        oldStores.forEach((store) => {
+          db.createObjectStore(store, { keyPath: store === "syncState" || store === "meta" ? "key" : "id" });
+        });
+      }
+    });
+    const account: Account = {
+      ...createRecordMeta("acc"),
+      name: "Preserved account",
+      type: "bank",
+      role: "spendable",
+      trackingMode: "ledger",
+      currency: "MYR",
+      reconcileWeekly: true,
+      sortOrder: 1
+    };
+    await oldDb.put("accounts", account);
+    oldDb.close();
+
+    const snapshot = await loadLiveSnapshot();
+
+    expect(snapshot.accounts.map((record) => record.name)).toContain("Preserved account");
+    expect(snapshot.importRowAudits).toEqual([]);
   });
 });

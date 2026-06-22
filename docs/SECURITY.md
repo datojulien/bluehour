@@ -20,6 +20,6 @@ Encrypted JSON backups use Web Crypto authenticated encryption. The passphrase i
 
 ## Known Security Work Remaining
 
-- Full profile-aware restore warnings and staged restore replacement.
 - Real OAuth manual verification against a production Google Cloud client.
-- PNG icon generation for complete Safari install polish.
+- Manual inspection that no OAuth token is persisted after deployed Google reconnection.
+- Stable `1.0.0` sign-off after the full `docs/RC_CHECKLIST.md` Google and Safari Dock-app checklist is completed.

@@ -9,7 +9,7 @@ flowchart TD
   Provider --> DemoDB[bluehour-profile-demo IndexedDB]
   Provider --> LiveDB[bluehour-profile-live IndexedDB]
   LiveDB --> Sync[Google sync planner]
-  Sync --> Sheets[Private Google Sheet v2 slots]
+  Sync --> Sheets[Private Google Sheet v3 slots]
   Provider --> Domain[Pure domain services]
 ```
 
@@ -44,3 +44,6 @@ Demo mode uses a deterministic clock. Live mode uses the current browser-local d
 - Starter live categories are production taxonomy records, not fictional financial records.
 - Demo mutations are local-only and never enter the sync outbox.
 - Google sync actions are disabled in demo before token request.
+- Forecasting is split between the safe-to-spend reserve calculation and a pure projected cash-flow engine. Salary boundaries are represented as explicit projection segments so payday belongs to the future cycle.
+- Import duplicate review is durable domain data (`ImportRowAudit`), not a transient UI session. Every imported row receives an auditable outcome.
+- Main routes are lazy-loaded to keep the first Vite chunk below the warning threshold without changing `chunkSizeWarningLimit`.

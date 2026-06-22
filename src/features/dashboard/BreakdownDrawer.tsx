@@ -1,15 +1,17 @@
 import { X } from "lucide-react";
 import { formatDisplayDate } from "../../domain/dates";
+import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
 import type { SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
 import { Amount } from "../../ui/Amount";
 
 interface BreakdownDrawerProps {
   result: SafeToSpendResult;
+  cashFlow?: CashFlowProjection;
   open: boolean;
   onClose: () => void;
 }
 
-export function BreakdownDrawer({ result, open, onClose }: BreakdownDrawerProps) {
+export function BreakdownDrawer({ result, cashFlow, open, onClose }: BreakdownDrawerProps) {
   if (!open) {
     return null;
   }
@@ -120,6 +122,37 @@ export function BreakdownDrawer({ result, open, onClose }: BreakdownDrawerProps)
             </div>
           ))}
         </div>
+
+        {cashFlow ? (
+          <div className="drawer-section">
+            <h3>Cash-flow assumptions</h3>
+            <div className="drawer-row strong">
+              <span>Projected closing balance</span>
+              <Amount value={cashFlow.closingBalanceMinor} />
+            </div>
+            <div className="drawer-row muted">
+              <span>Positive projected cash movements</span>
+              <Amount value={cashFlow.reconciliation.positiveProjectedDeltaMinor} />
+            </div>
+            <div className="drawer-row muted">
+              <span>Projected cash-impacting obligations</span>
+              <Amount value={-cashFlow.reconciliation.projectedCashImpactingObligationsMinor} />
+            </div>
+            {cashFlow.assumptions.map((assumption) => (
+              <div className="drawer-row muted" key={assumption}>
+                <span>{assumption}</span>
+              </div>
+            ))}
+            {cashFlow.excludedIncome.map((income) => (
+              <div className="drawer-row muted" key={income.id}>
+                <span>
+                  {income.label} on {formatDisplayDate(income.date)} is excluded
+                </span>
+                <Amount value={income.amountMinor} />
+              </div>
+            ))}
+          </div>
+        ) : null}
       </aside>
     </div>
   );

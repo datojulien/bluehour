@@ -12,6 +12,7 @@ import type {
   AppSettings,
   ImportBatch,
   ImportProfile,
+  ImportRowAudit,
   OutboxOperation,
   PlanInstance,
   Reconciliation,
@@ -36,6 +37,7 @@ import {
   appSettingsSchema,
   importBatchSchema,
   importProfileSchema,
+  importRowAuditSchema,
   outboxOperationSchema,
   planInstanceSchema,
   reconciliationSchema,
@@ -56,7 +58,7 @@ export const PROFILE_DB_NAMES: Record<ProfileId, string> = {
   live: "bluehour-profile-live"
 };
 
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 export const INDEXED_DB_SCHEMA_VERSION = DB_VERSION;
 export const DEMO_FIXTURE_VERSION = "v1-local-demo-v4";
 
@@ -81,6 +83,7 @@ interface BluehourDB extends DBSchema {
   categorisationRules: { key: string; value: CategorisationRule };
   importProfiles: { key: string; value: ImportProfile };
   importBatches: { key: string; value: ImportBatch };
+  importRowAudits: { key: string; value: ImportRowAudit };
   reconciliations: { key: string; value: Reconciliation };
   reviewSessions: { key: string; value: ReviewSession };
   settings: { key: string; value: AppSettings };
@@ -106,6 +109,7 @@ type DomainStoreName =
   | "categorisationRules"
   | "importProfiles"
   | "importBatches"
+  | "importRowAudits"
   | "reconciliations"
   | "reviewSessions";
 type SupportStoreName = "settings" | "outboxOperations" | "conflicts" | "syncState";
@@ -126,6 +130,7 @@ const DOMAIN_STORES = [
   "categorisationRules",
   "importProfiles",
   "importBatches",
+  "importRowAudits",
   "reconciliations",
   "reviewSessions"
 ] as const satisfies readonly DomainStoreName[];
@@ -143,10 +148,9 @@ export async function openBluehourDb(profileId: ProfileId = "demo"): Promise<IDB
         }
       }
 
-      if (db.objectStoreNames.contains("syncState")) {
-        db.deleteObjectStore("syncState");
+      if (!db.objectStoreNames.contains("syncState")) {
+        db.createObjectStore("syncState", { keyPath: "key" });
       }
-      db.createObjectStore("syncState", { keyPath: "key" });
 
       if (!db.objectStoreNames.contains("meta")) {
         db.createObjectStore("meta", { keyPath: "key" });
@@ -201,6 +205,7 @@ export async function seedDemoIfNeeded(): Promise<void> {
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
+  await putAll(tx.objectStore("importRowAudits"), snapshot.importRowAudits);
   await putAll(tx.objectStore("reconciliations"), snapshot.reconciliations);
   await putAll(tx.objectStore("reviewSessions"), snapshot.reviewSessions);
   await putAll(tx.objectStore("settings"), snapshot.settings);
@@ -239,6 +244,7 @@ export async function resetDemoProfile(): Promise<void> {
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
+  await putAll(tx.objectStore("importRowAudits"), snapshot.importRowAudits);
   await putAll(tx.objectStore("reconciliations"), snapshot.reconciliations);
   await putAll(tx.objectStore("reviewSessions"), snapshot.reviewSessions);
   await putAll(tx.objectStore("settings"), snapshot.settings);
@@ -323,6 +329,7 @@ export async function loadProfileSnapshot(profileId: ProfileId): Promise<Bluehou
     categorisationRules: await db.getAll("categorisationRules"),
     importProfiles: await db.getAll("importProfiles"),
     importBatches: await db.getAll("importBatches"),
+    importRowAudits: await db.getAll("importRowAudits"),
     reconciliations: await db.getAll("reconciliations"),
     reviewSessions: await db.getAll("reviewSessions")
     ,
@@ -360,6 +367,7 @@ export function validateSnapshot(snapshot: BluehourSnapshot): void {
   snapshot.categorisationRules.forEach((record) => categorisationRuleSchema.parse(record));
   snapshot.importProfiles.forEach((record) => importProfileSchema.parse(record));
   snapshot.importBatches.forEach((record) => importBatchSchema.parse(record));
+  snapshot.importRowAudits.forEach((record) => importRowAuditSchema.parse(record));
   snapshot.reconciliations.forEach((record) => reconciliationSchema.parse(record));
   snapshot.reviewSessions.forEach((record) => reviewSessionSchema.parse(record));
   snapshot.settings.forEach((record) => appSettingsSchema.parse(record));
@@ -392,6 +400,7 @@ export async function replaceProfileSnapshot(profileId: ProfileId, snapshot: Blu
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
+  await putAll(tx.objectStore("importRowAudits"), snapshot.importRowAudits);
   await putAll(tx.objectStore("reconciliations"), snapshot.reconciliations);
   await putAll(tx.objectStore("reviewSessions"), snapshot.reviewSessions);
   await putAll(tx.objectStore("settings"), snapshot.settings);

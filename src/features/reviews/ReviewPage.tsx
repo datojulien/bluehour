@@ -4,10 +4,12 @@ import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateAccountBalances } from "../../domain/accounts/calculations";
 import { formatDisplayDate, isOnOrAfter } from "../../domain/dates";
 import { closeSalaryCycleWithActualSalary } from "../../domain/forecasting/cycleCommands";
+import { decideImportAudit, parseAuditCandidates, transactionDraftFromAudit } from "../../domain/imports/importAudit";
 import { parseMoneyInput, percentageOfMinor } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
+import { createTransactionRecords } from "../../domain/transactions/commands";
 import { calculateCategoryActuals } from "../../domain/transactions/calculations";
-import type { BudgetAllocation, BudgetCycle, Category, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
+import type { BudgetAllocation, BudgetCycle, Category, ImportRowAudit, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 
@@ -42,8 +44,9 @@ export function ReviewPage() {
     );
   }
 
+  const loadedSnapshot = snapshot;
   const weeklyReview = snapshot.reviewSessions.find((review) => isActive(review) && review.type === "weekly");
-  const csvReviews = snapshot.reviewSessions.filter((review) => isActive(review) && review.periodKey.startsWith("csv:") && review.status === "open");
+  const uncertainImportAudits = snapshot.importRowAudits.filter((audit) => isActive(audit) && audit.outcome === "uncertain");
   const ruleReviews = snapshot.reviewSessions.filter((review) => isActive(review) && review.periodKey.startsWith("rule:") && review.status === "open");
   const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
   const activeAccounts = snapshot.accounts.filter(isActive);
@@ -103,6 +106,44 @@ export function ReviewPage() {
       },
       "cycle close checklist"
     );
+  }
+
+  async function linkImportAudit(audit: ImportRowAudit, transactionId: string) {
+    await saveRecord("importRowAudits", decideImportAudit(audit, "user_linked", transactionId), "import audit decision");
+    setMessage("Import row linked to an existing transaction.");
+  }
+
+  async function createImportAuditAsNew(audit: ImportRowAudit) {
+    const draft = transactionDraftFromAudit(audit);
+    const result = createTransactionRecords(
+      {
+        type: draft.type,
+        occurredOn: draft.occurredOn,
+        description: draft.description,
+        amountMinor: draft.amountMinor,
+        accountId: draft.accountId,
+        categoryId: draft.type === "income" ? "cat-income" : "cat-uncategorised",
+        importBatchId: draft.importBatchId,
+        importFingerprint: draft.importFingerprint,
+        source: "csv_import"
+      },
+      loadedSnapshot
+    );
+    await saveRecords(
+      [
+        { storeName: "transactions", record: result.transaction },
+        ...result.legs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+        ...result.splits.map((record) => ({ storeName: "transactionSplits" as const, record })),
+        { storeName: "importRowAudits", record: decideImportAudit(audit, "created", result.transaction.id) }
+      ],
+      "import audit decision"
+    );
+    setMessage("Import row created as a new transaction.");
+  }
+
+  async function ignoreImportAudit(audit: ImportRowAudit) {
+    await saveRecord("importRowAudits", decideImportAudit(audit, "ignored"), "import audit decision");
+    setMessage("Import row ignored.");
   }
 
   return (
@@ -201,7 +242,7 @@ export function ReviewPage() {
         </div>
       </section>
 
-      {csvReviews.length > 0 ? (
+      {uncertainImportAudits.length > 0 ? (
         <section className="dashboard-band">
           <div className="band-header">
             <div>
@@ -210,17 +251,41 @@ export function ReviewPage() {
             </div>
           </div>
           <div className="stack-list">
-            {csvReviews.map((review) => (
-              <div className="stack-row" key={review.id}>
+            {uncertainImportAudits.map((audit) => {
+              const candidates = parseAuditCandidates(audit);
+              return (
+              <div className="stack-row import-audit-row" key={audit.id}>
                 <span>
-                  <strong>{review.periodKey.replace("csv:", "Import ")}</strong>
-                  <small>{parseCsvReviewItems(review).length} row{parseCsvReviewItems(review).length === 1 ? "" : "s"} need manual review.</small>
+                  <strong>{audit.description}</strong>
+                  <small>
+                    {formatDisplayDate(audit.occurredOn)} · <Amount value={Math.abs(audit.signedAmountMinor)} /> · {candidates.length} candidate{candidates.length === 1 ? "" : "s"}
+                  </small>
                 </span>
-                <button className="secondary-action" type="button" onClick={() => void completeReview(review)}>
-                  Mark reviewed
-                </button>
+                <span className="inline-actions">
+                  {candidates.slice(0, 3).map((candidate) => {
+                    const transaction = snapshot.transactions.find((record) => record.id === candidate.transactionId);
+                    return (
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        key={candidate.transactionId}
+                        aria-label={`Link imported row ${audit.description} to ${transaction?.description ?? candidate.transactionId}`}
+                        onClick={() => void linkImportAudit(audit, candidate.transactionId)}
+                      >
+                        Link {candidate.score}
+                      </button>
+                    );
+                  })}
+                  <button className="secondary-action" type="button" onClick={() => void createImportAuditAsNew(audit)}>
+                    Create new
+                  </button>
+                  <button className="secondary-action" type="button" onClick={() => void ignoreImportAudit(audit)}>
+                    Ignore
+                  </button>
+                </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       ) : null}

@@ -8,7 +8,7 @@ describe("sheet serialization", () => {
 
     expect(payload.Meta[0]).toEqual(["key", "value"]);
     expect(payload.Meta[2]).toEqual(["remoteRevision", 1]);
-    expect(payload.Meta[1]).toEqual(["schemaVersion", 2]);
+    expect(payload.Meta[1]).toEqual(["schemaVersion", 3]);
     expect(payload.Accounts[0]).toContain("name");
     expect(payload.Transactions.length).toBeGreaterThan(1);
   });
@@ -164,6 +164,62 @@ describe("sheet serialization", () => {
     payload.Accounts[1][currencyIndex] = "USD";
 
     expect(() => deserializeSnapshotFromSheets(payload)).toThrow(/failed schema validation/);
+  });
+
+  it("round-trips import audit rows through mocked Sheet serialization", () => {
+    const snapshot = {
+      ...createDemoSnapshot(),
+      importRowAudits: [
+        {
+          id: "audit-1",
+          createdAt: "2026-07-12T00:00:00.000Z",
+          updatedAt: "2026-07-12T00:00:00.000Z",
+          archivedAt: null,
+          revision: 1,
+          importBatchId: "batch-1",
+          rowIndex: 0,
+          fileHash: "hash",
+          occurredOn: "2026-07-12" as const,
+          description: "=Formula-looking text",
+          signedAmountMinor: -1_200,
+          accountId: "acc-meranti-current",
+          sourceReference: "ref-1",
+          rowFingerprint: "fingerprint-1",
+          outcome: "strong_linked" as const,
+          linkedTransactionId: "txn-existing",
+          matchScore: 95,
+          matchReasonsJson: JSON.stringify(["same amount"]),
+          candidateTransactionIdsJson: JSON.stringify(["txn-existing"]),
+          candidateScoresJson: JSON.stringify([{ transactionId: "txn-existing", score: 95, reasons: ["same amount"] }]),
+          decisionSource: "automatic" as const,
+          decidedAt: "2026-07-12T00:00:00.000Z"
+        }
+      ]
+    };
+
+    const remote = deserializeSnapshotFromSheets(serializeSnapshotToSheets(snapshot));
+
+    expect(remote.snapshot.importRowAudits?.[0]).toMatchObject({
+      description: "=Formula-looking text",
+      outcome: "strong_linked",
+      linkedTransactionId: "txn-existing"
+    });
+  });
+
+  it("reads v2 sheets without an import audit tab as migration sources", () => {
+    const payload = serializeSnapshotToSheets(createDemoSnapshot(), 4);
+    payload.Meta = [
+      ["key", "value"],
+      ["schemaVersion", 2],
+      ["remoteRevision", 4],
+      ["activeSlot", "A"]
+    ];
+    delete payload.ImportRowAudits;
+
+    const remote = deserializeSnapshotFromSheets(payload);
+
+    expect(remote.schemaVersion).toBe(2);
+    expect(remote.snapshot.importRowAudits).toEqual([]);
   });
 
   it("reads a legacy single-slot Sheet as a migration source", async () => {

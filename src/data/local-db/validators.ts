@@ -11,6 +11,14 @@ const metaSchema = z.object({
 const minor = z.number().int();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+const jsonArrayString = z.string().refine((value) => {
+  try {
+    return Array.isArray(JSON.parse(value));
+  } catch {
+    return false;
+  }
+}, "Expected a JSON array string");
+
 export const accountSchema = metaSchema.extend({
   name: z.string(),
   type: z.enum(["bank", "savings", "cash", "ewallet", "credit_card", "loan", "investment", "property", "vehicle", "other"]),
@@ -112,6 +120,8 @@ export const planInstanceSchema = metaSchema.extend({
   linkedTransactionId: z.string().optional(),
   categoryId: z.string().optional(),
   accountId: z.string().optional(),
+  fromAccountId: z.string().optional(),
+  toAccountId: z.string().optional(),
   essential: z.boolean().optional(),
   isMainSalaryEstimate: z.boolean().optional()
 });
@@ -161,6 +171,29 @@ export const importBatchSchema = metaSchema.extend({
   newCount: z.number().int().nonnegative(),
   matchedCount: z.number().int().nonnegative(),
   reviewCount: z.number().int().nonnegative()
+});
+
+export const importRowAuditSchema = metaSchema.extend({
+  importBatchId: z.string(),
+  rowIndex: z.number().int().nonnegative(),
+  fileHash: z.string(),
+  occurredOn: isoDate,
+  description: z.string(),
+  signedAmountMinor: minor,
+  accountId: z.string(),
+  sourceReference: z.string().optional(),
+  rowFingerprint: z.string(),
+  outcome: z.enum(["created", "strong_linked", "uncertain", "user_linked", "ignored", "failed"]),
+  linkedTransactionId: z.string().optional(),
+  matchScore: z.number().int().optional(),
+  matchReasonsJson: jsonArrayString,
+  candidateTransactionIdsJson: jsonArrayString,
+  candidateScoresJson: jsonArrayString,
+  decisionSource: z.enum(["automatic", "user_approved", "none"]),
+  decidedAt: z.string().optional(),
+  failedReason: z.string().optional(),
+  rolledBackAt: z.string().optional(),
+  rollbackNote: z.string().optional()
 });
 
 export const reconciliationSchema = metaSchema.extend({
@@ -260,6 +293,7 @@ export const syncedStoreSchemas = {
   categorisationRules: categorisationRuleSchema,
   importProfiles: importProfileSchema,
   importBatches: importBatchSchema,
+  importRowAudits: importRowAuditSchema,
   reconciliations: reconciliationSchema,
   reviewSessions: reviewSessionSchema,
   settings: appSettingsSchema

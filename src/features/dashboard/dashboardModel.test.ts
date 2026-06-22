@@ -18,11 +18,11 @@ describe("dashboard model", () => {
 
   it("expands sparse forecast events into deterministic daily timeline points", () => {
     const model = buildDashboardModel(createDemoSnapshot(), demoAsOfDate);
-    const timeline = buildDailyTimeline(model.periods.next30Days.projected, 30);
+    const timeline = buildDailyTimeline(model.periods.next30Days.cashFlow, 30);
 
     expect(timeline).toHaveLength(30);
     expect(timeline[0].date).toBe(demoAsOfDate);
     expect(timeline.map((point) => point.date)).toContain("2026-07-26");
-    expect(timeline.some((point) => point.labels.includes("Main salary estimate"))).toBe(true);
+    expect(timeline.some((point) => point.labels.includes("Projected main salary (assumed)"))).toBe(true);
   });
 });

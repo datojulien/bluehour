@@ -29,6 +29,8 @@ export function generateRecurringPlanInstances(rule: RecurringRule, fromDate: Is
       status: "scheduled",
       categoryId: rule.categoryId,
       accountId: rule.fromAccountId ?? rule.toAccountId,
+      fromAccountId: rule.fromAccountId,
+      toAccountId: rule.toAccountId,
       essential: rule.essential,
       createdAt: now,
       updatedAt: now,

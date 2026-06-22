@@ -11,6 +11,7 @@ import type {
   AppSettings,
   ImportBatch,
   ImportProfile,
+  ImportRowAudit,
   IsoDate,
   OutboxOperation,
   PlanInstance,
@@ -361,6 +362,7 @@ export function createDemoSnapshot(): BluehourSnapshot {
   ];
 
   const importBatches: ImportBatch[] = [];
+  const importRowAudits: ImportRowAudit[] = [];
 
   const reconciliations: Reconciliation[] = [
     {
@@ -441,6 +443,7 @@ export function createDemoSnapshot(): BluehourSnapshot {
     categorisationRules,
     importProfiles,
     importBatches,
+    importRowAudits,
     reconciliations,
     reviewSessions,
     settings,

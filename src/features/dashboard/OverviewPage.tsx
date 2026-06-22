@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AlertTriangle, CalendarClock, ChevronRight, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
+import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
 import type { SafeToSpendPeriod, SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
 import { isActive, type BluehourSnapshot, type IsoDate } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
@@ -35,12 +36,13 @@ export function OverviewPage() {
   const selected = model.periods[period];
   const result = selected.available;
   const projected = selected.projected;
+  const cashFlow = selected.cashFlow;
   const cycle = model.activeCycle;
   const budgetRows = buildBudgetRows(snapshot, result);
 
   const upcoming = projected.breakdown.committedPlans.slice(0, 4);
-  const timeline = buildDailyTimeline(model.periods.next30Days.projected, 30);
-  const alerts = buildDashboardAlerts(snapshot, result, budgetRows, asOfDate);
+  const timeline = buildDailyTimeline(model.periods.next30Days.cashFlow, 30);
+  const alerts = buildDashboardAlerts(snapshot, result, cashFlow, budgetRows, asOfDate);
   const whatChanged = buildWhatChanged(snapshot, result, budgetRows);
 
   return (
@@ -67,8 +69,8 @@ export function OverviewPage() {
               <Amount value={result.dailyAmountMinor} /> per day
             </span>
             <span>
-              Lowest projected balance <Amount value={result.lowestProjectedBalanceMinor} /> on{" "}
-              {formatDisplayDate(result.lowestProjectedBalanceDate)}
+              Lowest projected balance <Amount value={cashFlow.lowestProjectedBalanceMinor} /> on{" "}
+              {formatDisplayDate(cashFlow.lowestProjectedBalanceDate)}
             </span>
           </div>
         </div>
@@ -126,7 +128,7 @@ export function OverviewPage() {
         </div>
         <div className="timeline">
           {timeline.map((point) => (
-            <div className={`timeline-point${point.isLowest ? " timeline-lowest" : ""}`} key={point.date}>
+            <div className={`timeline-point${point.isLowest ? " timeline-lowest" : ""}${point.isBelowBuffer ? " timeline-warning" : ""}`} key={point.date}>
               <span className="timeline-dot" aria-hidden="true" />
               <div>
                 <strong>{point.labels.length > 0 ? point.labels.join(", ") : "Projected day"}</strong>
@@ -228,7 +230,7 @@ export function OverviewPage() {
         </div>
       </section>
 
-      <BreakdownDrawer result={result} open={breakdownOpen} onClose={() => setBreakdownOpen(false)} />
+      <BreakdownDrawer result={result} cashFlow={cashFlow} open={breakdownOpen} onClose={() => setBreakdownOpen(false)} />
     </>
   );
 }
@@ -236,6 +238,7 @@ export function OverviewPage() {
 function buildDashboardAlerts(
   snapshot: BluehourSnapshot,
   result: SafeToSpendResult,
+  cashFlow: CashFlowProjection,
   budgetRows: Array<{ name: string; percentage: number; remaining: number }>,
   asOfDate: IsoDate
 ): Array<{ label: string; detail: string; level: "info" | "warning" | "danger" }> {
@@ -254,8 +257,12 @@ function buildDashboardAlerts(
   if (result.safeToSpendMinor === 0) {
     alerts.push({ label: "Safe to spend is RM0.00", detail: "Review discretionary plans and category budgets.", level: "danger" });
   }
-  if (result.lowestProjectedBalanceMinor < result.bufferReserveMinor) {
-    alerts.push({ label: "Projected balance below buffer", detail: "The forecast crosses the configured safety buffer.", level: "danger" });
+  if (cashFlow.firstBelowBufferDate) {
+    alerts.push({
+      label: "Projected balance below buffer",
+      detail: `The cash-flow projection crosses the active segment buffer on ${formatDisplayDate(cashFlow.firstBelowBufferDate)}.`,
+      level: "danger"
+    });
   }
   if (dueSoon.length > 0) {
     alerts.push({ label: "Payments due within seven days", detail: `${dueSoon.length} planned payment${dueSoon.length === 1 ? "" : "s"} due soon.`, level: "warning" });

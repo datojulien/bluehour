@@ -939,9 +939,16 @@ function parseWholeNumber(value: string, label: string): number {
 }
 
 function percentTextToBasisPoints(value: string): number {
-  const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  const trimmed = value.trim();
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) {
     throw new Error("Percentage must be zero or greater");
   }
-  return Math.round(parsed * 100);
+
+  const whole = Number.parseInt(match[1] ?? "0", 10);
+  const fraction = match[2] ?? "";
+  const paddedFraction = fraction.padEnd(3, "0");
+  const firstTwoDigits = Number.parseInt(paddedFraction.slice(0, 2), 10);
+  const roundingDigit = Number.parseInt(paddedFraction.slice(2, 3), 10);
+  return whole * 100 + firstTwoDigits + (roundingDigit >= 5 ? 1 : 0);
 }

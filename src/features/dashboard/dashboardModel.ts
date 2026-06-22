@@ -1,13 +1,20 @@
 import { calculateSafeToSpend, type SafeToSpendPeriod, type SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
+import {
+  calculateCashFlowProjection,
+  cloneAllocationsForVirtualCycle,
+  createVirtualFutureCycle,
+  projectedSalaryMinor,
+  type CashFlowProjection
+} from "../../domain/forecasting/cashFlowProjection";
 import { addDays, compareIsoDate, daysBetweenInclusive, endOfMonth, isWithinInclusive } from "../../domain/dates";
-import { nextSalaryWindowFromStart } from "../../domain/forecasting/salaryCycle";
-import type { Account, BalanceSnapshot, BluehourSnapshot, BudgetAllocation, BudgetCycle, IsoDate, PlanInstance } from "../../domain/types";
+import type { Account, BalanceSnapshot, BluehourSnapshot, BudgetCycle, IsoDate, PlanInstance } from "../../domain/types";
 import { isActive } from "../../domain/types";
 
 export interface DashboardPeriodResult {
   label: string;
   available: SafeToSpendResult;
   projected: SafeToSpendResult;
+  cashFlow: CashFlowProjection;
 }
 
 export interface DashboardModel {
@@ -20,6 +27,7 @@ export interface DailyTimelinePoint {
   balanceMinor: number;
   labels: string[];
   isLowest: boolean;
+  isBelowBuffer: boolean;
 }
 
 export function buildDashboardModel(snapshot: BluehourSnapshot, asOfDate: IsoDate): DashboardModel {
@@ -65,7 +73,13 @@ export function buildDashboardModel(snapshot: BluehourSnapshot, asOfDate: IsoDat
         {
           label: config.label,
           available: calculateSafeToSpend({ ...baseInput, includeFutureIncome: false }),
-          projected: calculateProjectedSafeToSpend(snapshot, activeCycle, asOfDate, config.horizonEndDate)
+          projected: calculateProjectedSafeToSpend(snapshot, activeCycle, asOfDate, config.horizonEndDate),
+          cashFlow: calculateCashFlowProjection({
+            snapshot,
+            cycle: activeCycle,
+            asOfDate,
+            horizonEndDate: config.horizonEndDate
+          })
         }
       ];
     })
@@ -74,36 +88,14 @@ export function buildDashboardModel(snapshot: BluehourSnapshot, asOfDate: IsoDat
   return { activeCycle, periods };
 }
 
-export function buildDailyTimeline(result: SafeToSpendResult, maxDays = 30): DailyTimelinePoint[] {
-  const daysToShow = Math.min(result.remainingDays, maxDays);
-  const eventLabelsByDate = new Map<IsoDate, string[]>();
-  result.forecast.forEach((point) => {
-    if (!point.label || point.label === "Today" || point.label === "Horizon") {
-      return;
-    }
-
-    const labels = eventLabelsByDate.get(point.date) ?? [];
-    labels.push(point.label);
-    eventLabelsByDate.set(point.date, labels);
-  });
-
-  let cursorBalance = result.netSpendableBalanceMinor;
-  let forecastIndex = 0;
-
-  return Array.from({ length: daysToShow }, (_, offset) => {
-    const date = addDays(result.asOfDate, offset);
-    while (forecastIndex < result.forecast.length && compareIsoDate(result.forecast[forecastIndex].date, date) <= 0) {
-      cursorBalance = result.forecast[forecastIndex].balanceMinor;
-      forecastIndex += 1;
-    }
-
-    return {
-      date,
-      balanceMinor: cursorBalance,
-      labels: eventLabelsByDate.get(date) ?? [],
-      isLowest: date === result.lowestProjectedBalanceDate
-    };
-  });
+export function buildDailyTimeline(projection: CashFlowProjection, maxDays = 30): DailyTimelinePoint[] {
+  return projection.days.slice(0, maxDays).map((day) => ({
+    date: day.date,
+    balanceMinor: day.balanceMinor,
+    labels: day.events.map((event) => (event.isAssumption ? `${event.label} (assumed)` : event.label)),
+    isLowest: day.isLowest,
+    isBelowBuffer: day.isBelowBuffer
+  }));
 }
 
 function calculateProjectedSafeToSpend(
@@ -131,9 +123,10 @@ function calculateProjectedSafeToSpend(
   }
 
   const salaryDate = activeCycle.expectedNextSalaryTo;
+  const currentEndDate = addDays(salaryDate, -1);
   const currentSegment = calculateSafeToSpend({
     asOfDate,
-    horizonEndDate: salaryDate,
+    horizonEndDate: currentEndDate,
     cycle: activeCycle,
     accounts: snapshot.accounts,
     balanceSnapshots: snapshot.balanceSnapshots,
@@ -149,7 +142,10 @@ function calculateProjectedSafeToSpend(
 
   const futureCycle = createVirtualFutureCycle(activeCycle, salaryDate, projectedSalaryMinor(snapshot.planInstances, activeCycle));
   const futureAccount = createVirtualSpendableAccount(snapshot.accounts);
-  const futureStartingBalance = currentSegment.forecast.at(-1)?.balanceMinor ?? currentSegment.netSpendableBalanceMinor + currentSegment.countedFutureIncomeMinor;
+  const futureStartingBalance =
+    (currentSegment.forecast.at(-1)?.balanceMinor ?? currentSegment.netSpendableBalanceMinor + currentSegment.countedFutureIncomeMinor) +
+    futureCycle.actualMainSalaryMinor +
+    confirmedNonSalaryIncomeOnDate(snapshot.planInstances, activeCycle, salaryDate);
   const futureSnapshot = createVirtualBalanceSnapshot(futureAccount.id, salaryDate, futureStartingBalance);
   const futureAllocations = cloneAllocationsForVirtualCycle(activeCycle.id, futureCycle.id, snapshot.budgetAllocations);
   const futureSegment = calculateSafeToSpend({
@@ -164,27 +160,11 @@ function calculateProjectedSafeToSpend(
     categories: snapshot.categories,
     budgetAllocations: [...snapshot.budgetAllocations, ...futureAllocations],
     budgetTransfers: [],
-    planInstances: snapshot.planInstances,
-    includeFutureIncome: false
+    planInstances: filterFuturePlans(snapshot.planInstances, activeCycle),
+    includeFutureIncome: true
   });
 
   return combineCrossCycleProjection(currentSegment, futureSegment, asOfDate, horizonEndDate);
-}
-
-function createVirtualFutureCycle(currentCycle: BudgetCycle, salaryDate: IsoDate, salaryMinor: number): BudgetCycle {
-  const window = nextSalaryWindowFromStart(salaryDate, 24, 26);
-  return {
-    ...currentCycle,
-    id: `${currentCycle.id}-virtual-next`,
-    startedOn: salaryDate,
-    endedOn: undefined,
-    status: "open",
-    salaryTransactionId: "virtual-main-salary",
-    expectedNextSalaryFrom: window.expectedNextSalaryFrom,
-    expectedNextSalaryTo: window.expectedNextSalaryTo,
-    actualMainSalaryMinor: salaryMinor,
-    closedAt: undefined
-  };
 }
 
 function createVirtualSpendableAccount(accounts: readonly Account[]): Account {
@@ -230,31 +210,31 @@ function createVirtualBalanceSnapshot(accountId: string, asOfDate: IsoDate, amou
   };
 }
 
-function cloneAllocationsForVirtualCycle(
-  currentCycleId: string,
-  virtualCycleId: string,
-  allocations: readonly BudgetAllocation[]
-): BudgetAllocation[] {
-  return allocations
-    .filter((allocation) => isActive(allocation) && allocation.budgetCycleId === currentCycleId)
-    .map((allocation) => ({
-      ...allocation,
-      id: `virtual-${allocation.id}`,
-      budgetCycleId: virtualCycleId,
-      note: "Estimated from the current approved budget template."
-    }));
+function confirmedNonSalaryIncomeOnDate(planInstances: readonly PlanInstance[], activeCycle: BudgetCycle, date: IsoDate): number {
+  return planInstances
+    .filter(
+      (plan) =>
+        isActive(plan) &&
+        plan.kind === "income" &&
+        plan.status === "scheduled" &&
+        plan.confidence === "confirmed" &&
+        plan.expectedDate === date &&
+        !(
+          plan.isMainSalaryEstimate &&
+          isWithinInclusive(plan.expectedDate, activeCycle.expectedNextSalaryFrom, activeCycle.expectedNextSalaryTo)
+        )
+    )
+    .reduce((total, plan) => total + plan.expectedAmountMinor, 0);
 }
 
-function projectedSalaryMinor(planInstances: readonly PlanInstance[], activeCycle: BudgetCycle): number {
-  const estimate = planInstances.find(
+function filterFuturePlans(planInstances: readonly PlanInstance[], activeCycle: BudgetCycle): PlanInstance[] {
+  return planInstances.filter(
     (plan) =>
-      isActive(plan) &&
-      plan.kind === "income" &&
-      plan.status === "scheduled" &&
-      plan.isMainSalaryEstimate &&
-      isWithinInclusive(plan.expectedDate, activeCycle.expectedNextSalaryFrom, activeCycle.expectedNextSalaryTo)
+      !(
+        plan.isMainSalaryEstimate &&
+        isWithinInclusive(plan.expectedDate, activeCycle.expectedNextSalaryFrom, activeCycle.expectedNextSalaryTo)
+      )
   );
-  return estimate?.expectedAmountMinor ?? activeCycle.actualMainSalaryMinor;
 }
 
 function combineCrossCycleProjection(
@@ -270,6 +250,7 @@ function combineCrossCycleProjection(
   const lowest = forecast.reduce((lowestPoint, point) => (point.balanceMinor < lowestPoint.balanceMinor ? point : lowestPoint), forecast[0]);
   const safeToSpendMinor = Math.max(0, Math.min(currentSegment.safeToSpendMinor, futureSegment.safeToSpendMinor));
   const remainingDays = daysBetweenInclusive(asOfDate, horizonEndDate);
+  const limitingSegment = currentSegment.safeToSpendMinor <= futureSegment.safeToSpendMinor ? currentSegment : futureSegment;
 
   return {
     ...currentSegment,
@@ -279,7 +260,7 @@ function combineCrossCycleProjection(
     committedReserveMinor: currentSegment.committedReserveMinor + futureSegment.committedReserveMinor,
     essentialEnvelopeReserveMinor: currentSegment.essentialEnvelopeReserveMinor + futureSegment.essentialEnvelopeReserveMinor,
     protectedReserveMinor: currentSegment.protectedReserveMinor + futureSegment.protectedReserveMinor,
-    bufferReserveMinor: currentSegment.bufferReserveMinor + futureSegment.bufferReserveMinor,
+    bufferReserveMinor: limitingSegment.bufferReserveMinor,
     cashCapacityMinor: Math.min(currentSegment.cashCapacityMinor, futureSegment.cashCapacityMinor),
     discretionaryRemainderMinor: Math.min(currentSegment.discretionaryRemainderMinor, futureSegment.discretionaryRemainderMinor),
     safeToSpendMinor,
@@ -304,8 +285,8 @@ function combineCrossCycleProjection(
       protectedTargetMinor: currentSegment.breakdown.protectedTargetMinor + futureSegment.breakdown.protectedTargetMinor,
       completedProtectedMinor: currentSegment.breakdown.completedProtectedMinor + futureSegment.breakdown.completedProtectedMinor,
       protectedReserveMinor: currentSegment.protectedReserveMinor + futureSegment.protectedReserveMinor,
-      bufferBaseMinor: currentSegment.breakdown.bufferBaseMinor + futureSegment.breakdown.bufferBaseMinor,
-      bufferReserveMinor: currentSegment.bufferReserveMinor + futureSegment.bufferReserveMinor,
+      bufferBaseMinor: limitingSegment.breakdown.bufferBaseMinor,
+      bufferReserveMinor: limitingSegment.bufferReserveMinor,
       discretionaryAllocationMinor:
         currentSegment.breakdown.discretionaryAllocationMinor + futureSegment.breakdown.discretionaryAllocationMinor,
       discretionarySpentMinor: currentSegment.breakdown.discretionarySpentMinor + futureSegment.breakdown.discretionarySpentMinor,
@@ -319,7 +300,8 @@ function combineCrossCycleProjection(
       warnings: [
         ...currentSegment.breakdown.warnings,
         ...futureSegment.breakdown.warnings,
-        "Projected salary starts an estimated next salary cycle using the current approved budget template."
+        "Projected salary starts an estimated next salary cycle using the current approved budget template.",
+        "Cross-cycle safety buffers are evaluated per salary segment; the limiting segment controls the projected safe-to-spend figure."
       ]
     }
   };

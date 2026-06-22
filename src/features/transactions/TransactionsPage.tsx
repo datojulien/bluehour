@@ -5,11 +5,18 @@ import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { findRuleProposals, matchesRule } from "../../domain/categorisation/rules";
 import { formatDisplayDate } from "../../domain/dates";
 import { detectDelimiter, hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
-import { scoreDuplicateMatch } from "../../domain/imports/duplicateMatching";
+import {
+  createImportRowAudit,
+  fingerprintImportRow,
+  markImportAuditRolledBack,
+  type ImportAuditCandidate,
+  type NormalisedImportRow
+} from "../../domain/imports/importAudit";
+import { rankDuplicateCandidates } from "../../domain/imports/importMatching";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
 import { createTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
-import type { CategorisationRule, ImportBatch, ImportProfile, RecordMeta, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
+import type { CategorisationRule, ImportBatch, ImportProfile, RecordMeta, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 import type { LocalMutation } from "../../data/local-db/localDb";
@@ -85,8 +92,8 @@ export function TransactionsPage() {
   const loadedSnapshot = snapshot;
   const accountsById = new Map(snapshot.accounts.map((account) => [account.id, account]));
   const categoriesById = new Map(snapshot.categories.map((category) => [category.id, category]));
-  const activeAccounts = snapshot.accounts.filter(isActive);
-  const activeCategories = snapshot.categories.filter((category) => isActive(category) && category.active);
+  const activeAccounts = snapshot.accounts.filter(isActive).sort((left, right) => left.sortOrder - right.sortOrder);
+  const activeCategories = snapshot.categories.filter((category) => isActive(category) && category.active).sort((left, right) => left.sortOrder - right.sortOrder);
 
   async function handleImport(text: string, options: CsvImportOptions) {
     if (!snapshot) {
@@ -95,6 +102,7 @@ export function TransactionsPage() {
 
     const delimiter = detectDelimiter(text);
     const parsed = parseCsv(text, delimiter);
+    const fileHash = await hashText(text);
     const profile: ImportProfile = {
       ...createRecordMeta("profile"),
       name: `CSV profile ${new Date().toLocaleDateString("en-MY")}`,
@@ -109,7 +117,7 @@ export function TransactionsPage() {
       ...createRecordMeta("batch"),
       importProfileId: profile.id,
       fileName: options.fileName,
-      fileHash: await hashText(text),
+      fileHash,
       importedAt: new Date().toISOString(),
       rowCount: parsed.rows.length,
       newCount: 0,
@@ -121,46 +129,101 @@ export function TransactionsPage() {
       { storeName: "importProfiles", record: profile },
       { storeName: "importBatches", record: batch }
     ];
-    const uncertainItems: Array<{ row: Record<string, string>; score: number; reasons: string[] }> = [];
+    const workingSnapshot = {
+      ...snapshot,
+      transactions: [...snapshot.transactions],
+      transactionLegs: [...snapshot.transactionLegs],
+      transactionSplits: [...snapshot.transactionSplits]
+    };
 
-    for (const row of parsed.rows) {
+    for (const [rowIndex, row] of parsed.rows.entries()) {
       const date = parseCsvDate(valueForColumn(row, options.mapping.date), options.dateFormat);
       const signedAmount = signedAmountFromCsvRow(row, options.mapping);
       const description = valueForColumn(row, options.mapping.description) || "Imported transaction";
       const reference = options.mapping.reference ? valueForColumn(row, options.mapping.reference) : "";
       const amountMinor = Math.abs(signedAmount);
       const type = signedAmount >= 0 ? "income" : "expense";
-      const duplicate = allTransactions
-        .map((transaction) =>
-          scoreDuplicateMatch(
-            {
-              sourceReference: reference,
-              accountId: options.accountId,
-              amountMinor: signedAmount,
-              occurredOn: date,
-              description,
-              importFingerprint: reference || undefined
-            },
-            {
-              sourceReference: transaction.importFingerprint,
-              accountId: options.accountId,
-              amountMinor: signedAmountForTransaction(transaction),
-              occurredOn: transaction.occurredOn,
-              description: transaction.description,
-              importFingerprint: transaction.importFingerprint
-            }
-          )
-        )
-        .sort((a, b) => b.score - a.score)[0];
+      const normalisedRow: NormalisedImportRow = {
+        importBatchId: batch.id,
+        rowIndex,
+        fileHash,
+        occurredOn: date,
+        description,
+        signedAmountMinor: signedAmount,
+        accountId: options.accountId,
+        sourceReference: reference || undefined,
+        rowFingerprint: fingerprintImportRow({
+          fileHash,
+          rowIndex,
+          occurredOn: date,
+          description,
+          signedAmountMinor: signedAmount,
+          sourceReference: reference || undefined
+        })
+      };
+      const previousAudit = snapshot.importRowAudits.find(
+        (audit) => audit.fileHash === fileHash && audit.rowFingerprint === normalisedRow.rowFingerprint && audit.linkedTransactionId
+      );
+      const candidates = rankDuplicateCandidates(
+        {
+          sourceReference: reference || undefined,
+          accountId: options.accountId,
+          signedAmountMinor: signedAmount,
+          occurredOn: date,
+          description,
+          importFingerprint: reference || normalisedRow.rowFingerprint
+        },
+        workingSnapshot
+      ).map(
+        (candidate): ImportAuditCandidate => ({
+          transactionId: candidate.transactionId,
+          score: candidate.score,
+          reasons: candidate.reasons
+        })
+      );
+      const duplicate = candidates[0];
 
-      if (duplicate?.outcome === "strong") {
+      if (previousAudit?.linkedTransactionId) {
         batch.matchedCount += 1;
+        mutations.push({
+          storeName: "importRowAudits",
+          record: createImportRowAudit({
+            row: normalisedRow,
+            outcome: "strong_linked",
+            candidates,
+            linkedTransactionId: previousAudit.linkedTransactionId,
+            decisionSource: "automatic"
+          })
+        });
         continue;
       }
 
-      if (duplicate?.outcome === "uncertain") {
+      if (duplicate && duplicate.score >= 75) {
+        batch.matchedCount += 1;
+        mutations.push({
+          storeName: "importRowAudits",
+          record: createImportRowAudit({
+            row: normalisedRow,
+            outcome: "strong_linked",
+            candidates,
+            linkedTransactionId: duplicate.transactionId,
+            decisionSource: "automatic"
+          })
+        });
+        continue;
+      }
+
+      if (duplicate && duplicate.score >= 50) {
         batch.reviewCount += 1;
-        uncertainItems.push({ row, score: duplicate.score, reasons: duplicate.reasons });
+        mutations.push({
+          storeName: "importRowAudits",
+          record: createImportRowAudit({
+            row: normalisedRow,
+            outcome: "uncertain",
+            candidates,
+            decisionSource: "none"
+          })
+        });
         continue;
       }
 
@@ -174,34 +237,36 @@ export function TransactionsPage() {
           categoryId: type === "income" ? "cat-income" : "cat-uncategorised",
           source: "csv_import",
           importBatchId: batch.id,
-          importFingerprint: reference || `${date}-${description}-${signedAmount}`
+          importFingerprint: normalisedRow.rowFingerprint
         },
-        snapshot
+        workingSnapshot
       );
       batch.newCount += 1;
       mutations.push({ storeName: "transactions", record: result.transaction });
       result.legs.forEach((record) => mutations.push({ storeName: "transactionLegs", record }));
       result.splits.forEach((record) => mutations.push({ storeName: "transactionSplits", record }));
+      mutations.push({
+        storeName: "importRowAudits",
+        record: createImportRowAudit({
+          row: normalisedRow,
+          outcome: "created",
+          candidates,
+          linkedTransactionId: result.transaction.id,
+          decisionSource: "automatic"
+        })
+      });
+      workingSnapshot.transactions.push(result.transaction);
+      workingSnapshot.transactionLegs.push(...result.legs);
+      workingSnapshot.transactionSplits.push(...result.splits);
       if (result.updatedRule) {
         mutations.push({ storeName: "categorisationRules", record: result.updatedRule });
       }
     }
 
-    if (uncertainItems.length > 0) {
-      const review: ReviewSession = {
-        ...createRecordMeta("review"),
-        type: "daily",
-        periodKey: `csv:${batch.id}`,
-        status: "open",
-        itemsJson: JSON.stringify(uncertainItems)
-      };
-      mutations.push({ storeName: "reviewSessions", record: review });
-    }
-
     mutations[1] = { storeName: "importBatches", record: batch };
     await saveRecords(mutations, "CSV import");
     setMessage(
-      `Imported ${batch.newCount} new rows. ${batch.matchedCount} strong duplicates skipped. ${batch.reviewCount} uncertain matches saved for review.`
+      `Imported ${batch.newCount} new rows. ${batch.matchedCount} strong duplicates linked. ${batch.reviewCount} uncertain matches saved for review.`
     );
   }
 
@@ -222,6 +287,8 @@ export function TransactionsPage() {
   async function rollbackImportBatch(batch: ImportBatch) {
     const importedTransactions = loadedSnapshot.transactions.filter((transaction) => transaction.importBatchId === batch.id && isActive(transaction));
     const transactionIds = new Set(importedTransactions.map((transaction) => transaction.id));
+    const batchAudits = loadedSnapshot.importRowAudits.filter((audit) => audit.importBatchId === batch.id && isActive(audit));
+    const rollbackNote = `Rollback requested for ${batch.fileName}; only transactions created by this batch were archived.`;
     const mutations: LocalMutation[] = [
       { storeName: "importBatches", record: archiveRecordValue(batch) }
     ];
@@ -233,6 +300,7 @@ export function TransactionsPage() {
     loadedSnapshot.transactionSplits
       .filter((split) => transactionIds.has(split.transactionId) && isActive(split))
       .forEach((split) => mutations.push({ storeName: "transactionSplits", record: archiveRecordValue(split) }));
+    batchAudits.forEach((audit) => mutations.push({ storeName: "importRowAudits", record: markImportAuditRolledBack(audit, rollbackNote) }));
 
     await saveRecords(mutations, "import rollback");
     setMessage(`Archived ${importedTransactions.length} imported transaction${importedTransactions.length === 1 ? "" : "s"} from ${batch.fileName}.`);
@@ -341,7 +409,12 @@ export function TransactionsPage() {
         />
       ) : null}
 
-      <CsvImportPanel accounts={activeAccounts} defaultDate={asOfDate} onImport={handleImport} />
+      <CsvImportPanel
+        accounts={activeAccounts}
+        importBatches={snapshot.importBatches.filter(isActive)}
+        defaultDate={asOfDate}
+        onImport={handleImport}
+      />
 
       <section className="dashboard-band">
         <div className="filter-bar">
@@ -376,7 +449,12 @@ export function TransactionsPage() {
         onApplyRule={applyRuleToHistory}
       />
 
-      <ImportBatchPanel batches={snapshot.importBatches.filter(isActive)} onRollback={rollbackImportBatch} />
+      <ImportBatchPanel
+        batches={snapshot.importBatches.filter(isActive)}
+        audits={snapshot.importRowAudits.filter(isActive)}
+        transactions={snapshot.transactions}
+        onRollback={rollbackImportBatch}
+      />
 
       <section className="dashboard-band">
         <div className="band-header">
@@ -558,7 +636,18 @@ function RuleReviewPanel({
   );
 }
 
-function ImportBatchPanel({ batches, onRollback }: { batches: ImportBatch[]; onRollback: (batch: ImportBatch) => Promise<void> }) {
+function ImportBatchPanel({
+  batches,
+  audits,
+  transactions,
+  onRollback
+}: {
+  batches: ImportBatch[];
+  audits: Array<{ importBatchId: string; outcome: string; description: string; linkedTransactionId?: string }>;
+  transactions: Transaction[];
+  onRollback: (batch: ImportBatch) => Promise<void>;
+}) {
+  const [confirmingBatchId, setConfirmingBatchId] = useState<string | null>(null);
   if (batches.length === 0) {
     return null;
   }
@@ -577,10 +666,13 @@ function ImportBatchPanel({ batches, onRollback }: { batches: ImportBatch[]; onR
           <span>Imported</span>
           <span>Rows</span>
           <span>New</span>
-          <span>Review</span>
+          <span>Audit</span>
           <span>Action</span>
         </div>
-        {batches.map((batch) => (
+        {batches.map((batch) => {
+          const batchAudits = audits.filter((audit) => audit.importBatchId === batch.id);
+          const linkedAudits = batchAudits.filter((audit) => audit.linkedTransactionId);
+          return (
           <div className="data-row" key={batch.id}>
             <span>
               <strong>{batch.fileName}</strong>
@@ -589,12 +681,29 @@ function ImportBatchPanel({ batches, onRollback }: { batches: ImportBatch[]; onR
             <span>{new Date(batch.importedAt).toLocaleString("en-MY")}</span>
             <span>{batch.rowCount}</span>
             <span>{batch.newCount}</span>
-            <span>{batch.reviewCount}</span>
-            <button className="secondary-action" type="button" onClick={() => void onRollback(batch)}>
-              Roll back
-            </button>
+            <span>
+              {batch.matchedCount} linked · {batch.reviewCount} review
+              {linkedAudits.slice(0, 1).map((audit) => {
+                const transaction = transactions.find((record) => record.id === audit.linkedTransactionId);
+                return (
+                  <small key={audit.description}>
+                    {audit.description} linked to {transaction?.description ?? audit.linkedTransactionId}
+                  </small>
+                );
+              })}
+            </span>
+            {confirmingBatchId === batch.id ? (
+              <button className="secondary-action danger-action" type="button" onClick={() => void onRollback(batch)}>
+                Confirm rollback
+              </button>
+            ) : (
+              <button className="secondary-action" type="button" onClick={() => setConfirmingBatchId(batch.id)}>
+                Roll back
+              </button>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -799,10 +908,12 @@ function TransactionComposer({
 
 function CsvImportPanel({
   accounts,
+  importBatches,
   defaultDate,
   onImport
 }: {
   accounts: Array<{ id: string; name: string }>;
+  importBatches: ImportBatch[];
   defaultDate: string;
   onImport: (text: string, options: CsvImportOptions) => Promise<void>;
 }) {
@@ -821,6 +932,22 @@ function CsvImportPanel({
   const [dateFormat, setDateFormat] = useState<ImportProfile["dateFormat"]>("YYYY-MM-DD");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [textHash, setTextHash] = useState("");
+  const [proceedWithReimport, setProceedWithReimport] = useState(false);
+  const duplicateBatch = importBatches.find((batch) => batch.fileHash === textHash);
+
+  useEffect(() => {
+    let cancelled = false;
+    void hashText(text).then((hash) => {
+      if (!cancelled) {
+        setTextHash(hash);
+        setProceedWithReimport(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [text]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -828,6 +955,11 @@ function CsvImportPanel({
     try {
       if (!encodingConfirmed) {
         throw new Error("Confirm the CSV is UTF-8 before importing");
+      }
+      const currentHash = textHash || (await hashText(text));
+      const currentDuplicateBatch = importBatches.find((batch) => batch.fileHash === currentHash);
+      if (currentDuplicateBatch && !proceedWithReimport) {
+        throw new Error("This file was previously imported. Inspect the previous batch or deliberately proceed with re-import.");
       }
       await onImport(text, {
         accountId,
@@ -854,10 +986,10 @@ function CsvImportPanel({
     }
 
     setError(null);
+    setEncodingConfirmed(false);
     try {
       setText(await file.text());
       setFileName(file.name);
-      setEncodingConfirmed(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not read CSV file");
     }
@@ -938,6 +1070,16 @@ function CsvImportPanel({
             />
           </label>
           <p className="form-note span-3">{parsed.rows.length} row{parsed.rows.length === 1 ? "" : "s"} ready for local preview and duplicate analysis.</p>
+          {duplicateBatch ? (
+            <label className="checkbox-label span-3">
+              <input
+                type="checkbox"
+                checked={proceedWithReimport}
+                onChange={(event) => setProceedWithReimport(event.target.checked)}
+              />
+              This file was previously imported as {duplicateBatch.fileName}; proceed with re-import
+            </label>
+          ) : null}
           {error ? <p className="form-error span-3">{error}</p> : null}
           <div className="form-actions span-3">
             <button className="secondary-action" type="button" onClick={() => setOpen(false)}>

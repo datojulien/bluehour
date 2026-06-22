@@ -52,7 +52,7 @@ describe("Google Sheets adapter", () => {
     expect(calls[0][0]).toContain("valueInputOption=RAW");
   });
 
-  it("adds missing v2 tabs to an existing Sheet", async () => {
+  it("adds missing schema tabs to an existing Sheet", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("fields=sheets.properties.title")) {

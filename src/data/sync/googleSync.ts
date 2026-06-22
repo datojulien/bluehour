@@ -20,6 +20,7 @@ export const SYNCED_STORES = [
   "categorisationRules",
   "importProfiles",
   "importBatches",
+  "importRowAudits",
   "reconciliations",
   "reviewSessions",
   "settings"

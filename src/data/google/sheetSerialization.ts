@@ -36,12 +36,24 @@ const STORE_BY_TAB = {
   CategorisationRules: "categorisationRules",
   ImportProfiles: "importProfiles",
   ImportBatches: "importBatches",
+  ImportRowAudits: "importRowAudits",
   Reconciliations: "reconciliations",
   ReviewSessions: "reviewSessions",
   Settings: "settings"
 } as const satisfies Record<(typeof GOOGLE_DOMAIN_TABS)[number], keyof BluehourSnapshot>;
 
-const JSON_STRING_COLUMNS = new Set(["columnMappingJson", "itemsJson", "localJson", "priceHistoryJson", "remoteJson", "signRulesJson", "valueJson"]);
+const JSON_STRING_COLUMNS = new Set([
+  "candidateScoresJson",
+  "candidateTransactionIdsJson",
+  "columnMappingJson",
+  "itemsJson",
+  "localJson",
+  "matchReasonsJson",
+  "priceHistoryJson",
+  "remoteJson",
+  "signRulesJson",
+  "valueJson"
+]);
 
 export function serializeSnapshotToSheets(snapshot: BluehourSnapshot, remoteRevision = currentRemoteRevision(snapshot) + 1): SheetPayload {
   return {

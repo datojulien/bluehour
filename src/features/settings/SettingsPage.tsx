@@ -41,6 +41,7 @@ export function SettingsPage() {
           <p className="eyebrow">Setup and portability</p>
           <h1>Settings</h1>
         </div>
+        <div className="date-chip">Bluehour {__BLUEHOUR_VERSION__}</div>
       </div>
 
       {message ? <section className="alert-band">{message}</section> : null}

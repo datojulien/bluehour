@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { completeLiveOnboarding, getStoreRecords, openDemo, setGoogleSyncState } from "./helpers";
 
@@ -171,7 +171,7 @@ test.describe("production readiness scenarios", () => {
     await page.locator('input[type="file"]').setInputFiles({
       name: "uncertain.csv",
       mimeType: "text/csv",
-      buffer: Buffer.from("date,description,amount,reference\n2026-06-26,Vista rent,-2200.00,UNCERTAIN-1\n")
+      buffer: Buffer.from("date,description,amount,reference\n2026-06-25,Ambiguous duplicate,-2200.00,\n")
     });
     await page.getByLabel("UTF-8 confirmed").check();
     await page.getByRole("button", { name: /Analyse and import/i }).click();
@@ -180,6 +180,103 @@ test.describe("production readiness scenarios", () => {
     await page.goto("/#/review");
 
     await expect(page.getByText(/Uncertain duplicate rows/i)).toBeVisible();
+  });
+
+  test("26. user can link an uncertain imported row", async ({ page }) => {
+    await importUncertainDuplicate(page, "link-uncertain.csv");
+    await page.goto("/#/review");
+
+    await page.getByRole("button", { name: /Link imported row Ambiguous duplicate/i }).first().click();
+
+    await expect(page.getByText("Import row linked to an existing transaction.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("Ambiguous duplicate")).toHaveCount(0);
+  });
+
+  test("27. user can create an uncertain imported row as new", async ({ page }) => {
+    await importUncertainDuplicate(page, "create-uncertain.csv");
+    await page.goto("/#/review");
+
+    await page.getByRole("button", { name: "Create new" }).click();
+
+    await expect(page.getByText("Import row created as a new transaction.")).toBeVisible();
+    await page.goto("/#/transactions");
+    await expect(page.locator(".data-row", { hasText: "Ambiguous duplicate" }).first()).toBeVisible();
+  });
+
+  test("28. user can ignore an uncertain imported row", async ({ page }) => {
+    await importUncertainDuplicate(page, "ignore-uncertain.csv");
+    await page.goto("/#/review");
+
+    await page.getByRole("button", { name: "Ignore" }).click();
+
+    await expect(page.getByText("Import row ignored.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("Ambiguous duplicate")).toHaveCount(0);
+  });
+
+  test("29. re-importing the same file requires deliberate confirmation", async ({ page }) => {
+    await openDemo(page);
+    await page.goto("/#/transactions");
+    const file = Buffer.from("date,description,amount,reference\n2026-07-12,Scenario import,-8.50,REIMPORT-1\n");
+
+    await page.getByRole("button", { name: /^Import$/i }).click();
+    await page.locator('input[type="file"]').setInputFiles({ name: "reimport.csv", mimeType: "text/csv", buffer: file });
+    await page.getByLabel("UTF-8 confirmed").check();
+    await page.getByRole("button", { name: /Analyse and import/i }).click();
+    await expect(page.getByText(/Imported 1 new rows/i)).toBeVisible();
+
+    await page.getByRole("button", { name: /^Import$/i }).click();
+    await page.locator('input[type="file"]').setInputFiles({ name: "reimport.csv", mimeType: "text/csv", buffer: file });
+    await page.getByLabel("UTF-8 confirmed").check();
+    await page.getByRole("button", { name: /Analyse and import/i }).click();
+
+    await expect(page.locator(".form-error", { hasText: /previously imported/i })).toBeVisible();
+  });
+
+  test("30. rollback archives only newly created import transactions", async ({ page }) => {
+    await openDemo(page);
+    await page.goto("/#/transactions");
+    const file = Buffer.from(
+      [
+        "date,description,amount,reference",
+        "2026-07-12,Rollback imported expense,-7.77,ROLLBACK-NEW",
+        "2026-06-25,Ambiguous duplicate,-2200.00,"
+      ].join("\n")
+    );
+
+    await page.getByRole("button", { name: /^Import$/i }).click();
+    await page.locator('input[type="file"]').setInputFiles({ name: "mixed-rollback.csv", mimeType: "text/csv", buffer: file });
+    await page.getByLabel("UTF-8 confirmed").check();
+    await page.getByRole("button", { name: /Analyse and import/i }).click();
+    await expect(page.getByText(/Imported 1 new rows\. 0 strong duplicates linked\. 1 uncertain matches saved for review\./i)).toBeVisible();
+
+    await page.goto("/#/review");
+    await page.getByRole("button", { name: /Link imported row Ambiguous duplicate/i }).first().click();
+    await expect(page.getByText("Import row linked to an existing transaction.")).toBeVisible();
+
+    await page.goto("/#/transactions");
+    const transactionRegion = page.getByRole("region", { name: "Transactions" });
+    await expect(transactionRegion.locator(".data-row", { hasText: "Rollback imported expense" })).toBeVisible();
+    await page.getByRole("button", { name: "Roll back" }).click();
+    await page.getByRole("button", { name: "Confirm rollback" }).click();
+
+    await expect(page.getByText(/Archived 1 imported transaction from mixed-rollback\.csv\./i)).toBeVisible();
+    const transactions = await getStoreRecords<{ description: string; archivedAt?: string | null }>(page, "bluehour-profile-demo", "transactions");
+    expect(transactions.filter((transaction) => transaction.description === "Rollback imported expense" && !transaction.archivedAt)).toHaveLength(0);
+    expect(transactions.filter((transaction) => transaction.description === "Vista Heights rent" && !transaction.archivedAt)).toHaveLength(1);
+
+    const audits = await getStoreRecords<{
+      description: string;
+      outcome: string;
+      linkedTransactionId?: string;
+      rollbackNote?: string;
+      rolledBackAt?: string;
+    }>(page, "bluehour-profile-demo", "importRowAudits");
+    const batchAudits = audits.filter((audit) => audit.description === "Rollback imported expense" || audit.description === "Ambiguous duplicate");
+    expect(batchAudits).toHaveLength(2);
+    expect(batchAudits.every((audit) => audit.rolledBackAt && audit.rollbackNote?.includes("only transactions created by this batch"))).toBe(true);
+    expect(batchAudits.some((audit) => audit.outcome === "user_linked" && audit.linkedTransactionId)).toBe(true);
   });
 
   test("16. weekly reconciliation", async ({ page }) => {
@@ -311,3 +408,17 @@ test.describe("production readiness scenarios", () => {
     await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
   });
 });
+
+async function importUncertainDuplicate(page: Page, fileName: string) {
+  await openDemo(page);
+  await page.goto("/#/transactions");
+  await page.getByRole("button", { name: /^Import$/i }).click();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: fileName,
+    mimeType: "text/csv",
+    buffer: Buffer.from("date,description,amount,reference\n2026-06-25,Ambiguous duplicate,-2200.00,\n")
+  });
+  await page.getByLabel("UTF-8 confirmed").check();
+  await page.getByRole("button", { name: /Analyse and import/i }).click();
+  await expect(page.getByText(/1 uncertain matches saved for review/i)).toBeVisible();
+}

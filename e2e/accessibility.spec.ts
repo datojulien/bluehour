@@ -13,6 +13,7 @@ test.describe("accessibility automation", () => {
 
     for (const path of ["/", "/#/transactions", "/#/plan", "/#/budgets", "/#/subscriptions", "/#/net-worth", "/#/review", "/#/settings"]) {
       await page.goto(path);
+      await expect(page.locator("main h1, h1").first()).toBeVisible();
       const results = await new AxeBuilder({ page }).analyze();
       expect(results.violations, `${path} accessibility violations`).toEqual([]);
     }

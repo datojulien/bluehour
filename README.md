@@ -6,7 +6,7 @@ Bluehour is a React + TypeScript personal cash-flow and salary-cycle budgeting a
 - Will I have enough for upcoming expenses?
 - Am I staying within my budgets?
 
-The app is not production-ready `1.0.0` yet. See `PRODUCTION_READINESS.md` for the exact completed and remaining items.
+The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md` for the exact verified status and the manual Google release gate.
 
 ## Demo And Live Profiles
 
@@ -69,7 +69,7 @@ The Playwright suite includes the 25 production-readiness scenarios and automate
 Playwright browsers can be installed with:
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit
 ```
 
 ## Production Build
@@ -136,7 +136,7 @@ Access tokens are memory-only and are cleared after user-initiated actions.
 
 Live mode can create an app-managed private Sheet named `Bluehour Finance Data`.
 
-Current Sheet schema version: `2`.
+Current Sheet schema version: `3`.
 
 New pushes use an active/inactive slot protocol:
 
@@ -146,22 +146,21 @@ New pushes use an active/inactive slot protocol:
 
 Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read as a migration source.
 
-Settings also includes a schema preparation action for existing Sheets; it adds any missing v2 tabs before push/sync without deleting data. Legacy v1 single-slot Sheet reading is covered with mocked tests, but a real legacy Sheet migration source still needs manual Google-account verification before `1.0.0`.
+Settings also includes a schema preparation action for existing Sheets; it adds any missing schema tabs before push/sync without deleting data. Legacy v1 single-slot and v2 slot Sheets can be read as mocked migration sources, but a real legacy Sheet migration source still needs manual Google-account verification before stable `1.0.0`.
 
-Manual Google verification before `1.0.0`:
-
-1. Deploy with the GitHub Pages origin authorised in Google Cloud.
-2. Create a private Bluehour Sheet from the live profile.
-3. Prepare v2 tabs on an existing Sheet.
-4. Push and sync live data using the app UI.
-5. Reconnect after clearing the in-memory token.
-6. Read a legacy v1 Sheet as a migration source without mutating it.
+Manual Google verification before stable `1.0.0` is tracked in `docs/RC_CHECKLIST.md`. Do not treat mocked Google tests as real OAuth verification.
 
 ## Offline Behaviour
 
 The app remains usable locally. Live mutations are saved to IndexedDB and queued in the outbox until Google sync is available. Demo mutations are local-only and never enter the Google outbox.
 
 The service worker uses network-first navigation and versioned static-asset caching so an old cached `index.html` does not permanently pin obsolete bundles.
+
+## Forecasting And Imports
+
+Bluehour stores and calculates all MYR values as integer sen. Salary-day projections are segmented so the current cycle ends the day before payday and the virtual future cycle begins on payday. The cash-flow timeline includes confirmed income, projected salary, plan-reserved payments, subscriptions, dated plans, protected contribution assumptions, and deterministic essential-envelope distributions.
+
+CSV imports save a durable audit row for every normalized row. Strong duplicates link to existing transactions without creating new ledger records; uncertain matches persist ranked candidate transaction IDs until the user links, creates, or ignores the row.
 
 ## Backup And Restore
 
@@ -177,7 +176,7 @@ Settings can create encrypted JSON backups with Web Crypto. The passphrase is ne
 
 ## Limitations
 
-Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The only remaining release blocker is external Google OAuth/Sheet verification with a real account and deployed origin.
+Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The expected remaining stable-release blocker is external Google OAuth/Sheet verification with a real account and deployed origin.
 
 ## Recovery
 

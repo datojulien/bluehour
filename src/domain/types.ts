@@ -154,6 +154,8 @@ export interface PlanInstance extends RecordMeta {
   linkedTransactionId?: string;
   categoryId?: string;
   accountId?: string;
+  fromAccountId?: string;
+  toAccountId?: string;
   essential?: boolean;
   isMainSalaryEstimate?: boolean;
 }
@@ -203,6 +205,32 @@ export interface ImportBatch extends RecordMeta {
   newCount: number;
   matchedCount: number;
   reviewCount: number;
+}
+
+export type ImportAuditOutcome = "created" | "strong_linked" | "uncertain" | "user_linked" | "ignored" | "failed";
+export type ImportDecisionSource = "automatic" | "user_approved" | "none";
+
+export interface ImportRowAudit extends RecordMeta {
+  importBatchId: string;
+  rowIndex: number;
+  fileHash: string;
+  occurredOn: IsoDate;
+  description: string;
+  signedAmountMinor: number;
+  accountId: string;
+  sourceReference?: string;
+  rowFingerprint: string;
+  outcome: ImportAuditOutcome;
+  linkedTransactionId?: string;
+  matchScore?: number;
+  matchReasonsJson: string;
+  candidateTransactionIdsJson: string;
+  candidateScoresJson: string;
+  decisionSource: ImportDecisionSource;
+  decidedAt?: UtcIsoTimestamp;
+  failedReason?: string;
+  rolledBackAt?: UtcIsoTimestamp;
+  rollbackNote?: string;
 }
 
 export interface Reconciliation extends RecordMeta {
@@ -301,6 +329,7 @@ export interface BluehourSnapshot {
   categorisationRules: CategorisationRule[];
   importProfiles: ImportProfile[];
   importBatches: ImportBatch[];
+  importRowAudits: ImportRowAudit[];
   reconciliations: Reconciliation[];
   reviewSessions: ReviewSession[];
   settings: AppSettings[];

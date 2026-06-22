@@ -13,7 +13,7 @@ lastModifiedByClientId?
 
 ## IndexedDB Schema
 
-Current IndexedDB schema version: `3`.
+Current IndexedDB schema version: `4`.
 
 Profile databases contain:
 
@@ -32,6 +32,7 @@ Profile databases contain:
 - `categorisationRules`
 - `importProfiles`
 - `importBatches`
+- `importRowAudits`
 - `reconciliations`
 - `reviewSessions`
 - `settings`
@@ -57,4 +58,16 @@ A fixture version change does not clear mutable profile data. Demo reset is expl
 
 ## Backup Schema
 
-Current backup implementation uses authenticated Web Crypto encryption for serialized snapshots. Production restore still needs a fully staged profile-aware restore flow before `1.0.0`.
+Backups include the full validated `BluehourSnapshot`, including import audit data. Restore decrypts, validates, warns about profile replacement, and replaces the local profile atomically after explicit confirmation.
+
+## Import Audit
+
+`ImportRowAudit` records one durable outcome for every normalized CSV row:
+
+```text
+created | strong_linked | uncertain | user_linked | ignored | failed
+```
+
+Each row stores the import batch ID, row index, file hash, normalized local date, normalized description, signed sen amount, imported account ID, source reference or row fingerprint, outcome, linked transaction ID when present, match score, match reasons, candidate transaction IDs and scores, decision source, decision timestamp, and optional rollback metadata.
+
+The audit stores only normalized import facts and candidate metadata. It does not retain unnecessary raw banking columns.

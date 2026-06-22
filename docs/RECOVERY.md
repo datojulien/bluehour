@@ -2,7 +2,7 @@
 
 ## Read-Only Recovery
 
-If storage or sync validation fails, Bluehour can enter `read_only_recovery`. In this state, writes should be paused and exports should remain available. The full recovery UI is still incomplete.
+If storage or sync validation fails, Bluehour can enter `read_only_recovery`. In this state, provider write APIs pause mutations and the recovery screen leaves export/backup options available.
 
 ## Legacy IndexedDB
 
@@ -18,9 +18,9 @@ Migration must validate every record before writing and must not overwrite eithe
 
 ## Google Sheet Recovery
 
-Google Sheet schema v2 uses active/inactive slots. If a staged push fails before `Meta.activeSlot` is updated, the former active slot remains readable.
+Google Sheet schema v3 uses active/inactive slots. If a staged push fails before `Meta.activeSlot` is updated, the former active slot remains readable.
 
-If a Sheet is malformed, Bluehour should refuse to replace valid local data. The complete unsupported-schema recovery UI remains a readiness item.
+If a Sheet is malformed or uses a newer unsupported schema, Bluehour refuses to replace valid local data and enters read-only recovery.
 
 ## Backup Restore
 
@@ -33,4 +33,4 @@ Encrypted backup restore should:
 5. Require confirmation.
 6. Replace records atomically.
 
-The current backup decrypt/restore path exists, but a full staged atomic replacement flow is still incomplete.
+Restore now validates the decrypted snapshot before replacement and leaves the current profile unchanged if validation fails.
