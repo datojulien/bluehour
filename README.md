@@ -10,10 +10,11 @@ The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODU
 
 ## Demo And Live Profiles
 
-First launch shows two choices:
+First launch shows three choices:
 
 - **Explore demonstration** opens isolated fictional MYR data with a fixed demo date.
-- **Set up my finances** creates or resumes an empty live profile using the browser-local date.
+- **Set up new finances** creates or resumes an empty live profile using the browser-local date.
+- **Continue from an existing Bluehour Sheet** opens a recovery wizard that authenticates with Google, accepts an existing Sheet URL or ID, previews the remote profile, and restores only after confirmation.
 
 Storage is isolated:
 
@@ -147,6 +148,26 @@ New pushes use an active/inactive slot protocol:
 Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read as a migration source.
 
 Settings also includes a schema preparation action for existing Sheets; it adds any missing schema tabs before push/sync without deleting data. Legacy v1 single-slot and v2 slot Sheets can be read as mocked migration sources, but a real legacy Sheet migration source still needs manual Google-account verification before stable `1.0.0`.
+
+Cross-device recovery uses a typed `profileManifest` settings record synced with the live profile. It stores a random profile UUID, lifecycle (`setup`, `ready_for_salary`, `live`, or `read_only_recovery`), current onboarding checkpoint where relevant, MYR currency, app version metadata, timestamps, and optional last-writing local device ID. It does not store Google email, computer name, account numbers, or hardware identifiers.
+
+Each browser also has a random local device ID stored only in `bluehour-shell`. The optional local label stays local. The device ID is diagnostic metadata only, not authentication.
+
+Before pushing, Bluehour reads the current remote revision and blocks stale-device writes when the Sheet has advanced. Sync then pulls non-conflicting remote changes, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
+
+Moving from laptop to desktop:
+
+1. On the laptop, connect Google.
+2. Press Save progress to Google or Sync now.
+3. Confirm the app says Saved to Google.
+4. On the desktop, open Bluehour.
+5. Choose Continue from an existing Bluehour Sheet.
+6. Sign into Google.
+7. Paste the Sheet URL.
+8. Confirm the remote profile.
+9. Continue onboarding or open the dashboard.
+10. Before returning to the laptop, sync the desktop.
+11. On the laptop, reconnect and check for changes.
 
 Manual Google verification before stable `1.0.0` is tracked in `docs/RC_CHECKLIST.md`. Do not treat mocked Google tests as real OAuth verification.
 

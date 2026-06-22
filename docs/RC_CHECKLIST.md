@@ -14,6 +14,8 @@ This checklist is release-blocking for stable `1.0.0`. It is not claimed complet
 
 Budget Coach work remains unreleased until the full automated gate passes, including Chromium and WebKit browser coverage.
 
+Cross-device recovery work remains unreleased until the full automated gate passes, including Chromium and WebKit browser coverage.
+
 ## External Manual Gate Before Stable `1.0.0`
 
 - [ ] Configure `VITE_GOOGLE_CLIENT_ID` in GitHub repository variables.
@@ -39,3 +41,31 @@ Budget Coach work remains unreleased until the full automated gate passes, inclu
 - [ ] Confirm no demonstration record appears in the live Sheet.
 - [ ] Inspect the browser storage and confirm no OAuth access token is persisted.
 - [ ] Verify safe-to-spend and the timeline against a small hand-calculated fixture.
+
+## Cross-Device Manual Gate
+
+Laptop-to-desktop onboarding:
+
+- [ ] Begin setup on device A
+- [ ] Connect Google
+- [ ] Save through the Budget step
+- [ ] Confirm the remote revision advanced
+- [ ] Open a clean browser profile on device B
+- [ ] Continue from the same Sheet
+- [ ] Confirm onboarding resumes at the correct step
+- [ ] Complete another step on device B
+- [ ] Sync device B
+- [ ] Reopen device A
+- [ ] Check for remote changes
+- [ ] Pull device B's update
+- [ ] Confirm no duplicate accounts, plans, or allocations
+
+Also test:
+
+- [ ] Simultaneous non-conflicting edits
+- [ ] Simultaneous conflicting edit
+- [ ] Stale-device push rejection
+- [ ] Conflict resolution
+- [ ] Offline edits followed by reconnect
+- [ ] Device disconnection
+- [ ] Legacy Sheet connection

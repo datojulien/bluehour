@@ -22,6 +22,34 @@ Google Sheet schema v3 uses active/inactive slots. If a staged push fails before
 
 If a Sheet is malformed or uses a newer unsupported schema, Bluehour refuses to replace valid local data and enters read-only recovery.
 
+## Continue From Existing Sheet
+
+The welcome screen offers `Continue from an existing Bluehour Sheet`. This path never creates a new Sheet. It requires the user to:
+
+1. Connect Google.
+2. Paste a full Sheet URL or raw spreadsheet ID.
+3. Let Bluehour inspect metadata, `Meta`, active slot records, schema version, remote revision, record counts, and the profile manifest.
+4. Preview profile name, lifecycle, currency, last saved time, revision, and counts.
+5. Confirm local device setup before any local replacement.
+
+If the live profile on this device already contains meaningful records, Bluehour offers cancel/export/use local/replace choices in the UI and requires explicit replacement confirmation. Different profile IDs are never merged automatically.
+
+Remote restore is atomic from the user's perspective: validation happens before local replacement, downloaded data creates no outbox operations, the connection descriptor is saved locally, `syncState` records the remote revision, and shell state is reconstructed from the manifest.
+
+## Legacy Sheet Recovery
+
+Legacy v1/v2/v3 Sheets may not contain a profile manifest. Bluehour can inspect them without writing, infer likely lifecycle from evidence, and ask the user to choose a resume point such as Accounts, Income, Obligations, Budget, Wait for salary, or live profile. A manifest is written only after explicit confirmation and a successful staged push.
+
+## Stale Device Recovery
+
+Before a push, Bluehour verifies:
+
+```text
+expectedRemoteRevision === actualRemoteRevision
+```
+
+If another device committed first, the push is blocked with `remote_revision_changed`. The user must check for changes, pull non-conflicting records or resolve conflicts, and then press Sync now again.
+
 ## Backup Restore
 
 Encrypted backup restore should:

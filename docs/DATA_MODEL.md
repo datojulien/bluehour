@@ -50,6 +50,16 @@ bluehour-profile-live   real user profile records
 bluehour-local          legacy prototype database, left untouched
 ```
 
+`bluehour-shell` also stores a local-only random device identity:
+
+```text
+deviceId
+createdAt
+displayLabel?   local only
+```
+
+The device ID is generated with `crypto.randomUUID()`. It is not derived from hardware and is not proof of ownership.
+
 ## Demo Fixture Version
 
 Current demo fixture version: `v1-local-demo-v4`.
@@ -87,6 +97,40 @@ acceptedDecisions[]
 Recommendation results themselves are transient. Accepted category amounts become ordinary `BudgetAllocation` records and retain an approval note. This keeps backup, restore, Google A/B-slot staging, and sync conflict handling on the existing Settings and BudgetAllocations paths without a schema version bump.
 
 Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
+
+## Profile Manifest
+
+Cross-device recovery stores a typed `profileManifest` record in the existing synced `settings` store. No new IndexedDB store or Google Sheet tab is added.
+
+```text
+manifestVersion
+profileId                 stable UUID
+profileName
+currency                  MYR
+lifecycle                 setup | ready_for_salary | live | read_only_recovery
+onboardingStep?           google | preferences | accounts | income | obligations | budget | wait_salary | start_cycle
+createdAt
+updatedAt
+createdByAppVersion
+updatedByAppVersion?
+lastWrittenByDeviceId?
+```
+
+The manifest participates in normal Settings backup, restore, Google A/B-slot staging, and conflict handling. It is schema-validated when loaded from IndexedDB, backup, or Google Sheets. It does not store Google email, account numbers, device labels, computer names, hardware IDs, or IP addresses.
+
+Downloaded remote records do not create outbox operations. A remote restore writes a complete validated local snapshot, a local Google connection descriptor, synced `syncState`, and reconstructed shell state atomically from the user-confirmed profile.
+
+`googleConnection` settings written by current builds contain:
+
+```text
+spreadsheetId
+sheetSchemaVersion
+profileId
+lastKnownRemoteRevision
+lastSuccessfulSyncAt?
+```
+
+Legacy descriptors remain readable so existing local profiles can be migrated deterministically on the next save.
 
 ## Import Audit
 

@@ -5,6 +5,8 @@
 - Added local-only Budget Coach guidance for first-budget onboarding, the Budgets page, Review, and a restrained dashboard shortfall cue.
 - Added Flexible, Balanced, and Secure coaching profiles with explainable protected-rate adjustment, constrained-budget detection, safety-buffer reservation, and deterministic priority-weight allocation.
 - Added completed-cycle median history, observed/reliable confidence labels, and atomic accept-one or accept-all budget recommendation flows.
+- Added a Continue-from-existing-Bluehour-Sheet recovery wizard with Google sign-in, URL/ID entry, read-only remote inspection, profile preview, explicit replacement confirmation, and onboarding/live resume routing.
+- Added a synced typed profile manifest, local-only random device identity, stale remote-revision push blocking, cross-profile merge blocking, and Settings controls for checking changes, syncing, copying connection details, and disconnecting one device.
 
 ## 1.0.0-rc.1
 

@@ -16,6 +16,12 @@ Budget Coach is deterministic, explainable, and local-only. It guides first-cycl
 
 The local verification attempt on 22/06/2026 passed lint, unit tests, typecheck, build, and Chromium Playwright coverage. Full `npm run test:e2e` could not pass in this host because WebKit browser dependencies are missing and this environment does not provide `sudo` or `apt-get` to install them.
 
+## Unreleased Cross-Device Recovery Work
+
+Safe cross-device recovery and synchronisation have been added in the working tree but are not promoted to the next RC until every automated gate passes.
+
+The implementation adds a typed synced profile manifest, a local-only random device identity, a Continue-from-existing-Sheet wizard, stale remote-revision checks before push, profile-ID merge blocking, Settings cross-device controls, local-only onboarding status, and guarded legacy Sheet inspection. It still requires real Google laptop-to-desktop verification before stable production use.
+
 ## Verified Automated Gates
 
 These commands were run locally from a clean dependency install during the RC pass:
