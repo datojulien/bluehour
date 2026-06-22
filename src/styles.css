@@ -1659,6 +1659,16 @@ h3 {
     justify-content: center;
   }
 
+  .recovery-steps .primary-action span {
+    display: revert;
+  }
+
+  .recovery-steps .primary-action {
+    width: auto;
+    padding: 0 14px;
+    justify-content: flex-start;
+  }
+
   .page-header {
     display: grid;
   }
