@@ -5,8 +5,9 @@
 - Added local-only Budget Coach guidance for first-budget onboarding, the Budgets page, Review, and a restrained dashboard shortfall cue.
 - Added Flexible, Balanced, and Secure coaching profiles with explainable protected-rate adjustment, constrained-budget detection, safety-buffer reservation, and deterministic priority-weight allocation.
 - Added completed-cycle median history, observed/reliable confidence labels, and atomic accept-one or accept-all budget recommendation flows.
-- Added a Continue-from-existing-Bluehour-Sheet recovery wizard with Google sign-in, URL/ID entry, read-only remote inspection, profile preview, explicit replacement confirmation, and onboarding/live resume routing.
-- Added a synced typed profile manifest, local-only random device identity, stale remote-revision push blocking, cross-profile merge blocking, and Settings controls for checking changes, syncing, copying connection details, and disconnecting one device.
+- Added Google Sign-In plus a hidden Google Drive app-data vault as the primary browser sync path, with no persisted OAuth tokens.
+- Added Drive vault staged writes with inactive-slot validation, manifest-last commit, cross-profile merge blocking, and Settings controls for syncing, exporting the local descriptor, optional Sheet export, and disconnecting one browser.
+- Kept Google Sheets as optional manual export/inspection rather than the login or daily sync source.
 
 ## 1.0.0-rc.1
 

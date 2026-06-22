@@ -13,8 +13,8 @@ The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODU
 First launch shows three choices:
 
 - **Explore demonstration** opens isolated fictional MYR data with a fixed demo date.
-- **Set up new finances** creates or resumes an empty live profile using the browser-local date.
-- **Continue with Google** opens a recovery wizard that authenticates with Google, finds app-accessible Bluehour Sheets automatically, previews the remote profile, and restores only after confirmation. A Sheet URL or ID remains available as a fallback.
+- **Continue with Google** signs in with Google and opens a hidden Drive app-data vault for cross-browser sync.
+- **Set up locally first** creates or resumes an empty live profile using the browser-local date and lets the user connect Google later.
 
 Storage is isolated:
 
@@ -23,7 +23,7 @@ Storage is isolated:
 - Live profile: `bluehour-profile-live`
 - Legacy prototype DB: `bluehour-local`, detected but left untouched
 
-Demo data cannot create, push, pull, or sync a Google Sheet. Demo exports and backups are labelled fictional.
+Demo data cannot create, push, pull, or sync a Google Drive vault or Google Sheet export. Demo exports and backups are labelled fictional.
 
 ## Local Setup
 
@@ -65,7 +65,7 @@ npm run build
 npm run test:e2e
 ```
 
-The Playwright suite includes the 25 production-readiness scenarios and automated axe accessibility checks.
+The Playwright suite includes production-readiness scenarios, Drive-vault browser flows, WebKit critical flows, and automated axe accessibility checks.
 
 Playwright browsers can be installed with:
 
@@ -97,11 +97,12 @@ It is a public browser OAuth client ID, not a secret.
 
 Use the same Google Cloud project for every step below:
 
-1. Enable the **Google Sheets API** and **Google Drive API** in APIs & Services.
-2. Configure the OAuth consent screen.
-3. Create an OAuth client for a web application.
+1. Enable the **Google Drive API** in APIs & Services for the primary Drive vault.
+2. Enable the **Google Sheets API** only if you want optional Sheet export/inspection.
+3. Configure the OAuth consent screen.
+4. Create an OAuth client for a web application.
 
-A `Google Sheets create failed with 403` or `Google Drive file search failed with 403` error usually means the matching API is not enabled for the project that owns `VITE_GOOGLE_CLIENT_ID`, or the OAuth consent/scope setup is incomplete.
+A `Google Drive app-data file failed with 403` or `Google Sheets create failed with 403` error usually means the matching API is not enabled for the project that owns `VITE_GOOGLE_CLIENT_ID`, or the OAuth consent/scope setup is incomplete.
 
 For local development, add this exact authorized JavaScript origin:
 
@@ -128,43 +129,52 @@ https://datojulien.github.io/bluehour/
 Bluehour requests only:
 
 ```text
+openid
+email
+profile
+https://www.googleapis.com/auth/drive.appdata
+```
+
+Optional Google Sheet export requests this scope only when the export button is used:
+
+```text
 https://www.googleapis.com/auth/drive.file
 ```
 
-Access tokens are memory-only and are cleared after user-initiated actions. Sheet discovery uses Drive file metadata for app-accessible spreadsheets only; it does not request broad Google Drive access.
+Access tokens are memory-only and are cleared after user-initiated actions. Bluehour stores only non-secret Google account metadata, Drive app-data file IDs, and remote revision details locally.
 
-## Google Sheet Storage
+## Google Drive Vault Storage
 
-Live mode can create an app-managed private Sheet named `Bluehour Finance Data`.
+Live mode stores the synced profile in hidden files under the user's Google Drive `appDataFolder`. These files are not visible in normal Drive browsing and are accessible only to Bluehour's OAuth client.
 
-Current Sheet schema version: `3`.
+Current Drive vault schema version: `1`.
 
-New pushes use an active/inactive slot protocol:
+The vault uses three app-data files:
 
-- `Meta`
-- `A_...` data tabs
-- `B_...` data tabs
+- `bluehour-manifest.json`
+- `bluehour-slot-A.json`
+- `bluehour-slot-B.json`
 
-Bluehour writes the inactive slot, reads it back for verification, then updates `Meta.activeSlot` last. Existing v1 single-slot Sheets can be read as a migration source.
+Bluehour writes the inactive slot, reads it back for runtime-schema validation and round-trip comparison, then updates `bluehour-manifest.json` last. The manifest stores schema version, remote revision, active slot, profile ID, app version, commit timestamp, and last writer device ID.
 
-Settings also includes a schema preparation action for existing Sheets; it adds any missing schema tabs before push/sync without deleting data. Legacy v1 single-slot and v2 slot Sheets can be read as mocked migration sources, but a real legacy Sheet migration source still needs manual Google-account verification before stable `1.0.0`.
+Google Sheets remain available from Settings as optional manual export/inspection. Sheets are not used for login, onboarding, or daily sync.
 
 Cross-device recovery uses a typed `profileManifest` settings record synced with the live profile. It stores a random profile UUID, lifecycle (`setup`, `ready_for_salary`, `live`, or `read_only_recovery`), current onboarding checkpoint where relevant, MYR currency, app version metadata, timestamps, and optional last-writing local device ID. It does not store Google email, computer name, account numbers, or hardware identifiers.
 
 Each browser also has a random local device ID stored only in `bluehour-shell`. The optional local label stays local. The device ID is diagnostic metadata only, not authentication.
 
-Before pushing, Bluehour reads the current remote revision and blocks stale-device writes when the Sheet has advanced. Sync then pulls non-conflicting remote changes, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
+Before pushing, Bluehour reads the current Drive vault revision and blocks stale-device writes when the remote profile has advanced. Sync then pulls non-conflicting remote changes, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
 
 Moving from laptop to desktop:
 
-1. On the laptop, connect Google.
-2. Press Save progress to Google or Sync now.
-3. Confirm the app says Saved to Google.
+1. On the laptop, choose Continue with Google or connect Google in Settings.
+2. Press Save progress to Google or Sync Drive vault.
+3. Confirm the app says Saved to Google Drive.
 4. On the desktop, open Bluehour.
 5. Choose Continue with Google.
 6. Sign into the same Google account.
-7. Let Bluehour find the app-accessible Sheet, or paste the Sheet link/ID only if it does not appear.
-8. Confirm the remote profile.
+7. Let Bluehour load the hidden Drive vault.
+8. Confirm the remote profile if this browser already contains local live data.
 9. Continue onboarding or open the dashboard.
 10. Before returning to the laptop, sync the desktop.
 11. On the laptop, reconnect and check for changes.
@@ -213,8 +223,8 @@ Settings can create encrypted JSON backups with Web Crypto. The passphrase is ne
 
 ## Limitations
 
-Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The expected remaining stable-release blocker is external Google OAuth/Sheet verification with a real account and deployed origin.
+Important remaining gaps are tracked in `PRODUCTION_READINESS.md`. The expected remaining stable-release blocker is external Google OAuth and Drive app-data vault verification with a real account and deployed origin.
 
 ## Recovery
 
-See `docs/RECOVERY.md` for legacy database, read-only recovery, Google slot recovery, and backup restore notes.
+See `docs/RECOVERY.md` for legacy database, read-only recovery, Drive vault recovery, optional Sheet export, and backup restore notes.

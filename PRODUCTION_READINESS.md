@@ -6,33 +6,33 @@ Last updated: 22/06/2026
 
 Bluehour is prepared as `1.0.0-rc.1` when the automated verification suite below passes on the release-candidate files.
 
-This is not a stable `1.0.0` release. Real Google OAuth, real private Sheet sync, Safari Add-to-Dock, and GitHub Pages deployment remain manual release gates for stable production use.
+This is not a stable `1.0.0` release. Real Google OAuth, real Drive app-data vault sync, optional Sheet export verification, and GitHub Pages deployment remain manual release gates for stable production use.
 
-## Unreleased Budget Coach Work
+## Budget Coach Status
 
-Budget Coach has been added in the working tree but is not promoted to `1.0.0-rc.2` until every automated gate passes.
+Budget Coach remains local-only browser guidance and is covered by the automated verification suite listed below.
 
 Budget Coach is deterministic, explainable, and local-only. It guides first-cycle onboarding, remains available in Budgets and Review, detects constrained budgets, excludes possible variable income from base budgets, applies Flexible/Balanced/Secure protected-rate profiles, reserves the safety buffer as unallocated cash, and improves confidence with completed-cycle medians.
 
-The local verification attempt on 22/06/2026 passed lint, unit tests, typecheck, build, and Chromium Playwright coverage. Full `npm run test:e2e` could not pass in this host because WebKit browser dependencies are missing and this environment does not provide `sudo` or `apt-get` to install them.
+The local verification attempt on 22/06/2026 passed lint, unit tests, coverage, typecheck, build, and the full Playwright suite with Chromium, WebKit, and mobile-scoped coverage.
 
-## Unreleased Cross-Device Recovery Work
+## Google Drive Vault Status
 
-Safe cross-device recovery and synchronisation have been added in the working tree but are not promoted to the next RC until every automated gate passes.
+Google-only browser login and Drive app-data vault synchronisation have been added and passed the automated verification suite listed below.
 
-The implementation adds a typed synced profile manifest, a local-only random device identity, a Continue-from-existing-Sheet wizard, stale remote-revision checks before push, profile-ID merge blocking, Settings cross-device controls, local-only onboarding status, and guarded legacy Sheet inspection. It still requires real Google laptop-to-desktop verification before stable production use.
+The implementation adds Google Sign-In profile metadata, memory-only access tokens, a hidden Drive app-data vault with manifest-last staged writes, profile-ID merge blocking, Settings Drive vault controls, local-only onboarding status, and optional Google Sheet export for inspection. It still requires real Google laptop-to-desktop verification before stable production use.
 
 ## Verified Automated Gates
 
-These commands were run locally from a clean dependency install during the RC pass:
+These commands were run locally from a clean dependency install during this pass:
 
 - `npm ci`: passed, 262 packages installed, 0 vulnerabilities.
 - `npm run lint`: passed.
-- `npm test`: passed, 21 test files and 87 tests.
-- `npm run test:coverage`: passed, 85.6% statements, 75.46% branches, 91.66% functions, 85.33% lines.
+- `npm test`: passed, 27 test files and 142 tests.
+- `npm run test:coverage`: passed, 82.13% statements, 71.1% branches, 88.19% functions, 81.88% lines.
 - `npm run typecheck`: passed.
-- `npm run build`: passed, no Vite main-chunk warning; route-level lazy loading keeps the main app chunk at 359.76 kB.
-- `npm run test:e2e`: passed, 47 browser tests and 70 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
+- `npm run build`: passed, no Vite main-chunk warning; route-level lazy loading keeps the main app chunk at 368.94 kB.
+- `npm run test:e2e`: passed, 51 browser tests and 72 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
 
 ## Completed In `1.0.0-rc.1`
 
@@ -59,8 +59,12 @@ These commands were run locally from a clean dependency install during the RC pa
 - [x] Added `importRowAudits` to IndexedDB, validated snapshots, encrypted backup/restore, Google Sheet serialisation, and sync conflict data.
 - [x] Incremented IndexedDB schema to v4 with a non-destructive upgrade path.
 - [x] Incremented Google Sheet schema to v3 while keeping v1 and v2 readable as migration sources.
-- [x] Preserved the staged Google A/B-slot write protocol with inactive-slot writes, full read-back, runtime validation, round-trip comparison, and `Meta.activeSlot` last.
+- [x] Preserved staged Google remote writes with inactive-slot writes, full read-back, runtime validation, round-trip comparison, and commit metadata written last.
 - [x] Added mocked Google schema round-trip and migration-source tests for the audit model.
+- [x] Added Google Sign-In profile metadata with Drive app-data scope and no persisted OAuth tokens.
+- [x] Added hidden Drive vault files for `bluehour-manifest.json`, `bluehour-slot-A.json`, and `bluehour-slot-B.json`.
+- [x] Refactored the sync planner around provider-neutral remote snapshots while keeping Google Sheets as optional export/inspection.
+- [x] Added mocked Drive vault tests for staged writes, unsupported-schema recovery, profile restore, and browser login flows.
 - [x] Added WebKit critical-flow coverage while retaining Chromium coverage.
 - [x] Updated GitHub Actions to install Chromium and WebKit Playwright browsers.
 - [x] Added `CHANGELOG.md`, `docs/RC_CHECKLIST.md`, and refreshed architecture, data model, Google sync, security, recovery, and README documentation.
@@ -73,14 +77,15 @@ The only expected unchecked stable-release gate is real external Google verifica
 The required manual checklist is in `docs/RC_CHECKLIST.md` and includes:
 
 - Configure `VITE_GOOGLE_CLIENT_ID` in GitHub repository variables.
-- Enable Google Sheets API and Google Drive API in the Google Cloud project.
+- Enable Google Drive API in the Google Cloud project.
+- Enable Google Sheets API only for optional Sheet export verification.
 - Configure the authorised JavaScript origin in Google Cloud.
 - Deploy GitHub Pages.
-- Open the deployed app in Safari and add it to the Dock.
+- Open the deployed app in Safari and a second browser profile.
 - Create a live profile with no fictional data.
-- Create and verify a private Bluehour Google Sheet.
-- Confirm inactive-slot writes, `Meta.activeSlot` last, reload/pull, offline outbox, reconnection, conflicts, v1 migration-source reads, encrypted backup restore, and no persisted OAuth token.
+- Create and verify a hidden Bluehour Drive app-data vault.
+- Confirm inactive-slot writes, `bluehour-manifest.json` last, reload/pull, offline outbox, reconnection, conflicts, optional Sheet export, encrypted backup restore, and no persisted OAuth token.
 
 ## Stable `1.0.0` Rule
 
-Do not create a stable `1.0.0` release until the manual Google/Safari/GitHub Pages checklist has been completed and recorded with observed results.
+Do not create a stable `1.0.0` release until the manual Google Drive vault/GitHub Pages checklist has been completed and recorded with observed results.

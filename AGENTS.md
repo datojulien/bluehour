@@ -47,5 +47,5 @@ npm run test:e2e
 ## Current Cautions
 
 - The app is not labelled production-ready or versioned `1.0.0`.
-- Google OAuth and live Sheet sync are tested with mocks only.
-- The CSV importer, plan confirmation, and forecast engine still have documented production gaps in `PRODUCTION_READINESS.md`.
+- Google OAuth and live Drive app-data vault sync are tested with mocks only; real deployed-origin verification remains a manual release gate.
+- Remaining stable-release gates are documented in `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md`.

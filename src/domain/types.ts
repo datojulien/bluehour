@@ -307,7 +307,14 @@ export interface SyncState {
     | "conflict"
     | "failed"
     | "read_only_recovery";
+  provider?: "drive_appdata" | "sheets";
   spreadsheetId?: string;
+  driveManifestFileId?: string;
+  driveSlotAFileId?: string;
+  driveSlotBFileId?: string;
+  googleSubject?: string;
+  googleEmail?: string;
+  googleName?: string;
   profileId?: string;
   remoteRevision?: number;
   lastSyncedAt?: UtcIsoTimestamp;

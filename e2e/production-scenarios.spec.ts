@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { completeLiveOnboarding, getStoreRecords, openDemo, setGoogleSyncState } from "./helpers";
+import { completeLiveOnboarding, getStoreRecords, mockDriveAppDataVault, mockGoogleIdentity, openDemo, setGoogleSyncState } from "./helpers";
 
 test.describe("production readiness scenarios", () => {
   test.beforeEach(({ page }, testInfo) => {
@@ -13,7 +13,7 @@ test.describe("production readiness scenarios", () => {
 
     await expect(page.getByRole("heading", { name: /Personal cash-flow planning/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Explore demonstration/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Set up new finances/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Set up locally first/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Continue with Google/i })).toBeVisible();
   });
 
@@ -27,7 +27,7 @@ test.describe("production readiness scenarios", () => {
 
   test("3. live setup contains no fictional records", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Set up new finances/i }).click();
+    await page.getByRole("button", { name: /Set up locally first/i }).click();
 
     await expect(page.getByText("Live setup")).toBeVisible();
     await expect(page.getByText(/Saved on this device only/i)).toBeVisible();
@@ -56,7 +56,7 @@ test.describe("production readiness scenarios", () => {
 
   test("6. current live date comes from the browser-local clock", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /Set up new finances/i }).click();
+    await page.getByRole("button", { name: /Set up locally first/i }).click();
     const expected = await page.evaluate(() => new Intl.DateTimeFormat("en-GB").format(new Date()));
 
     await expect(page.getByText(`Today ${expected}`)).toBeVisible();
@@ -329,119 +329,34 @@ test.describe("production readiness scenarios", () => {
 
   test("20. reconnection state remains locally usable", async ({ page }) => {
     await completeLiveOnboarding(page);
-    await setGoogleSyncState(page, "needs_reconnection", "Reconnect required for Google Sheets.");
+    await setGoogleSyncState(page, "needs_reconnection", "Reconnect required for Google Drive vault.");
     await page.reload();
 
-    await expect(page.getByText("Reconnect required for Google Sheets.")).toBeVisible();
+    await expect(page.getByText("Reconnect required for Google Drive vault.")).toBeVisible();
     await page.goto("/#/transactions?new=1");
     await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
   });
 
   test("21. Google sync UI uses mocked APIs", async ({ page }) => {
-    await page.addInitScript(() => {
-      window.google = {
-        accounts: {
-          oauth2: {
-            initTokenClient: (config) => ({
-              requestAccessToken: () => config.callback({ access_token: "mock-token" })
-            })
-          }
-        }
-      };
-    });
-    await page.route("https://sheets.googleapis.com/v4/spreadsheets", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ spreadsheetId: "mock-sheet-id" }) });
-    });
+    await mockGoogleIdentity(page);
+    await mockDriveAppDataVault(page);
     await completeLiveOnboarding(page);
     await page.goto("/#/settings");
-    await page.getByRole("button", { name: /Create Sheet/i }).click();
+    await page.getByRole("button", { name: /Sync Drive vault/i }).click();
 
-    await expect(page.getByText(/Google Sheet created/i)).toBeVisible();
+    await expect(page.getByRole("main").getByText(/Google Drive vault created and local profile pushed/i)).toBeVisible();
   });
 
   test("31. Continue with Google shows a remote profile preview", async ({ page }) => {
-    await page.addInitScript(() => {
-      window.google = {
-        accounts: {
-          oauth2: {
-            initTokenClient: (config) => ({
-              requestAccessToken: () => config.callback({ access_token: "mock-token" })
-            })
-          }
-        }
-      };
-    });
-    await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files.*/, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          files: [
-            {
-              id: "mockExistingSheet",
-              name: "Bluehour Finance Data",
-              modifiedTime: "2026-06-22T09:42:00.000Z"
-            }
-          ]
-        })
-      });
-    });
-    await page.route("https://sheets.googleapis.com/v4/spreadsheets/mockExistingSheet?fields=sheets.properties.title", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          sheets: ["Meta", "A_Settings", "A_Accounts"].map((title) => ({ properties: { title } }))
-        })
-      });
-    });
-    await page.route(/https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets\/mockExistingSheet\/values:batchGet.*/, async (route) => {
-      const url = new URL(route.request().url());
-      const ranges = url.searchParams.getAll("ranges");
-      const manifest = {
-        manifestVersion: 1,
-        profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
-        profileName: "Personal finances",
-        currency: "MYR",
-        lifecycle: "setup",
-        onboardingStep: "budget",
-        createdAt: "2026-06-22T09:42:00.000Z",
-        updatedAt: "2026-06-22T09:42:00.000Z",
-        createdByAppVersion: "1.0.0-rc.1"
-      };
-      const valuesFor = (range: string) => {
-        if (range === "Meta!A1:ZZZ") {
-          return [
-            ["key", "value"],
-            ["schemaVersion", 3],
-            ["remoteRevision", 14],
-            ["activeSlot", "A"],
-            ["committedAt", "2026-06-22T09:42:00.000Z"]
-          ];
-        }
-        if (range === "A_Settings!A1:ZZZ") {
-          return [
-            ["archivedAt", "createdAt", "id", "key", "revision", "updatedAt", "valueJson"],
-            [null, "2026-06-22T09:42:00.000Z", "settings-manifest", "profileManifest", 1, "2026-06-22T09:42:00.000Z", JSON.stringify(manifest)]
-          ];
-        }
-        return [["id"]];
-      };
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          valueRanges: ranges.map((range) => ({ range, values: valuesFor(range) }))
-        })
-      });
-    });
+    await mockGoogleIdentity(page);
+    await mockDriveAppDataVault(page, { existingRemote: true, remoteRevision: 14, onboardingStep: "budget" });
 
     await page.goto("/");
     await page.getByRole("button", { name: /Continue with Google/i }).click();
     await page.getByRole("button", { name: /Continue with Google/i }).click();
 
-    await expect(page.getByText("Found Bluehour Finance Data and inspected the remote profile.")).toBeVisible();
-    await expect(page.getByLabel("Remote profile preview").getByText("Personal finances")).toBeVisible();
+    await expect(page.getByText("Google Drive vault found. Preview it before setting up this browser.")).toBeVisible();
+    await expect(page.getByLabel("Google Drive vault preview").getByText("Personal finances")).toBeVisible();
     await expect(page.getByText(/Remote revision/i)).toBeVisible();
   });
 

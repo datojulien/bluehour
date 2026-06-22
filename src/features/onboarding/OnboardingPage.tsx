@@ -1,9 +1,15 @@
 import { CheckCircle2, Circle, KeyRound, Landmark, Plus } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
-import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
-import { createBluehourSpreadsheet, createConnectionDescriptor, ensureBluehourSheetSchema, parseConnectionDescriptor } from "../../data/google/googleSheetsAdapter";
-import { pushSnapshotToGoogleSheet } from "../../data/google/sheetSerialization";
+import {
+  createDriveConnectionDescriptor,
+  driveVaultFilesFromDescriptor,
+  ensureDriveVaultFiles,
+  parseDriveConnectionDescriptor,
+  pushSnapshotToDriveVault
+} from "../../data/google/driveAppDataVault";
+import { clearInMemoryGoogleAccessToken, fetchGoogleAccountProfile, requestGoogleAccessToken } from "../../data/google/googleAuth";
+import { loadLiveSnapshot } from "../../data/local-db/localDb";
 import { createStarterCategories } from "../../domain/categories/starterCategories";
 import { formatDisplayDate } from "../../domain/dates";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
@@ -99,12 +105,18 @@ export function OnboardingPage() {
 
     try {
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const spreadsheetId = await createBluehourSpreadsheet(token);
+      const account = await fetchGoogleAccountProfile(token);
+      const files = await ensureDriveVaultFiles(token);
       const manifest = snapshot ? readProfileManifest(snapshot.settings) : null;
       if (!manifest) {
         throw new Error("Profile manifest is not ready yet");
       }
-      const descriptor = createConnectionDescriptor(spreadsheetId, { profileId: manifest.profileId });
+      const descriptor = createDriveConnectionDescriptor(files, {
+        profileId: manifest.profileId,
+        googleSubject: account.sub,
+        googleEmail: account.email,
+        googleName: account.name
+      });
       const existing = snapshot?.settings.find((setting) => setting.key === "googleConnection");
       const setting: AppSettings = existing
         ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
@@ -115,7 +127,25 @@ export function OnboardingPage() {
           };
 
       await saveRecordsAndAdvanceOnboarding([{ storeName: "settings", record: setting }], "preferences", "setup", "Google connection");
-      setMessage("Google Sheet created. Use Save progress to Google when you want this setup available on another device.");
+      const updatedSnapshot = await loadLiveSnapshot();
+      const nextRemoteRevision = 1;
+      await pushSnapshotToDriveVault(files, updatedSnapshot, token, fetch, nextRemoteRevision, 0);
+      await markSynced({
+        key: "google",
+        provider: "drive_appdata",
+        status: "synced",
+        driveManifestFileId: files.manifestFileId,
+        driveSlotAFileId: files.slotAFileId,
+        driveSlotBFileId: files.slotBFileId,
+        googleSubject: account.sub,
+        googleEmail: account.email,
+        googleName: account.name,
+        profileId: manifest.profileId,
+        remoteRevision: nextRemoteRevision,
+        lastSyncedAt: new Date().toISOString(),
+        message: "Google Drive vault created. This setup is available on your other browsers."
+      });
+      setMessage("Google Drive vault created. This setup is available on your other browsers.");
     } finally {
       clearInMemoryGoogleAccessToken();
     }
@@ -126,29 +156,35 @@ export function OnboardingPage() {
       throw new Error("Bluehour data has not loaded yet");
     }
     if (!GOOGLE_CLIENT_ID) {
-      throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Sheets");
+      throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Drive");
     }
     const connection = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
     if (!connection) {
-      throw new Error("Connect Google before saving progress to the Sheet");
+      throw new Error("Connect Google before saving progress to the Drive vault");
     }
-    const descriptor = parseConnectionDescriptor(JSON.parse(connection.valueJson));
+    const descriptor = parseDriveConnectionDescriptor(JSON.parse(connection.valueJson));
     const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
     try {
       const expectedRemoteRevision = snapshot.syncState.find((state) => state.key === "google")?.remoteRevision ?? descriptor.lastKnownRemoteRevision;
       const nextRemoteRevision = expectedRemoteRevision + 1;
-      await ensureBluehourSheetSchema(descriptor.spreadsheetId, token);
-      await pushSnapshotToGoogleSheet(descriptor.spreadsheetId, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
+      const files = driveVaultFilesFromDescriptor(descriptor);
+      await pushSnapshotToDriveVault(files, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
       await markSynced({
         key: "google",
+        provider: "drive_appdata",
         status: "synced",
-        spreadsheetId: descriptor.spreadsheetId,
+        driveManifestFileId: descriptor.driveManifestFileId,
+        driveSlotAFileId: descriptor.driveSlotAFileId,
+        driveSlotBFileId: descriptor.driveSlotBFileId,
+        googleSubject: descriptor.googleSubject,
+        googleEmail: descriptor.googleEmail,
+        googleName: descriptor.googleName,
         profileId: descriptor.profileId,
         remoteRevision: nextRemoteRevision,
         lastSyncedAt: new Date().toISOString(),
-        message: "Saved to Google. This progress is available on your other devices."
+        message: "Saved to Google Drive. This progress is available on your other browsers."
       });
-      setMessage("Saved to Google. This progress is available on your other devices.");
+      setMessage("Saved to Google Drive. This progress is available on your other browsers.");
     } finally {
       clearInMemoryGoogleAccessToken();
     }
@@ -370,7 +406,7 @@ function GoogleOnboardingPanel({
         </div>
       </div>
       <div className="stack-list">
-        <p>Bluehour can create a private app-managed Sheet now, or you can keep working locally and connect later in Settings.</p>
+        <p>Bluehour can create a private hidden Google Drive vault now, or you can keep working locally and connect later in Settings.</p>
         {!hasClientId ? (
           <p className="form-note danger-text">No Google client ID is available in this running Vite session. Add it to `.env`, then restart `npm run dev`.</p>
         ) : null}
@@ -403,11 +439,11 @@ function OnboardingCheckpointStatus({
   const pendingChanges = snapshot.outboxOperations.length;
   const statusText =
     syncState?.status === "synced"
-      ? "Saved to Google. Available on your other devices."
+      ? "Saved to Google Drive. Available on your other browsers."
       : connection
         ? pendingChanges > 0
           ? `${pendingChanges} changes waiting to sync.`
-          : "Saved on this device. Reconnect Google to make this progress available elsewhere."
+            : "Saved on this device. Reconnect Google to make this progress available elsewhere."
         : "Saved on this device only.";
 
   return (
@@ -416,7 +452,7 @@ function OnboardingCheckpointStatus({
         <strong>{statusText}</strong>
         <small>
           {connection
-            ? "Use the same hosted Bluehour app and a Google account with access to this Sheet on the other device."
+            ? "Use the same hosted Bluehour app and the same Google account on another browser."
             : "Enable cross-device recovery before expecting another device to continue this setup."}
         </small>
       </div>

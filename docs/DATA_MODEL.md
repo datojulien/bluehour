@@ -72,7 +72,7 @@ Backups include the full validated `BluehourSnapshot`, including import audit da
 
 ## Budget Coach Preferences
 
-Budget Coach does not add an IndexedDB store or Google Sheet tab. It stores preferences inside the existing `preferences` setting as typed `budgetCoach` data:
+Budget Coach does not add an IndexedDB store, Drive vault file, or Google Sheet tab. It stores preferences inside the existing `preferences` setting as typed `budgetCoach` data:
 
 ```text
 profileId: flexible | balanced | secure
@@ -94,13 +94,13 @@ acceptedDecisions[]
   appliedCategoryIds[]
 ```
 
-Recommendation results themselves are transient. Accepted category amounts become ordinary `BudgetAllocation` records and retain an approval note. This keeps backup, restore, Google A/B-slot staging, and sync conflict handling on the existing Settings and BudgetAllocations paths without a schema version bump.
+Recommendation results themselves are transient. Accepted category amounts become ordinary `BudgetAllocation` records and retain an approval note. This keeps backup, restore, Google Drive vault staging, optional Sheet export, and sync conflict handling on the existing Settings and BudgetAllocations paths without a schema version bump.
 
 Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
 
 ## Profile Manifest
 
-Cross-device recovery stores a typed `profileManifest` record in the existing synced `settings` store. No new IndexedDB store or Google Sheet tab is added.
+Cross-device recovery stores a typed `profileManifest` record in the existing synced `settings` store. No new IndexedDB store, Drive vault file, or Google Sheet tab is added.
 
 ```text
 manifestVersion
@@ -116,21 +116,27 @@ updatedByAppVersion?
 lastWrittenByDeviceId?
 ```
 
-The manifest participates in normal Settings backup, restore, Google A/B-slot staging, and conflict handling. It is schema-validated when loaded from IndexedDB, backup, or Google Sheets. It does not store Google email, account numbers, device labels, computer names, hardware IDs, or IP addresses.
+The manifest participates in normal Settings backup, restore, Google Drive vault staging, optional Sheet export, and conflict handling. It is schema-validated when loaded from IndexedDB, backup, Drive vaults, or Google Sheets. It does not store Google email, account numbers, device labels, computer names, hardware IDs, or IP addresses.
 
 Downloaded remote records do not create outbox operations. A remote restore writes a complete validated local snapshot, a local Google connection descriptor, synced `syncState`, and reconstructed shell state atomically from the user-confirmed profile.
 
-`googleConnection` settings written by current builds contain:
+`googleConnection` settings written by current builds contain the Drive vault descriptor:
 
 ```text
-spreadsheetId
-sheetSchemaVersion
+provider: drive_appdata
+vaultSchemaVersion
 profileId
+driveManifestFileId
+driveSlotAFileId
+driveSlotBFileId
+googleSubject?
+googleEmail?
+googleName?
 lastKnownRemoteRevision
 lastSuccessfulSyncAt?
 ```
 
-Legacy descriptors remain readable so existing local profiles can be migrated deterministically on the next save.
+Legacy Sheet descriptors remain readable for optional export/inspection migration, but new sync descriptors use the Drive vault provider.
 
 ## Import Audit
 

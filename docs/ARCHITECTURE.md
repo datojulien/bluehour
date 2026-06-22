@@ -1,6 +1,6 @@
 # Architecture
 
-Bluehour is a static React + TypeScript app hosted on GitHub Pages. It is local-first: IndexedDB is the working store and Google Sheets is an optional remote backup/sync target for the live profile only.
+Bluehour is a static React + TypeScript app hosted on GitHub Pages. It is local-first: IndexedDB is the working store and a hidden Google Drive `appDataFolder` vault is the optional cross-browser source of truth for the live profile only.
 
 ```mermaid
 flowchart TD
@@ -8,8 +8,9 @@ flowchart TD
   Provider --> ShellDB[bluehour-shell IndexedDB]
   Provider --> DemoDB[bluehour-profile-demo IndexedDB]
   Provider --> LiveDB[bluehour-profile-live IndexedDB]
-  LiveDB --> Sync[Google sync planner]
-  Sync --> Sheets[Private Google Sheet v3 slots]
+  LiveDB --> Sync[Remote snapshot sync planner]
+  Sync --> Drive[Hidden Drive app-data vault slots]
+  LiveDB -. optional export .-> Sheets[Google Sheet v3 inspection export]
   Provider --> Domain[Pure domain services]
 ```
 
@@ -38,18 +39,18 @@ The legacy database is detected where browser support allows it, but is not open
 
 ## Cross-Device Recovery
 
-The browser-local shell database remains local and is not mirrored to Google. Cross-device resume is driven by the synced `profileManifest` settings record. Onboarding commands update the local shell state and the manifest checkpoint together so another device can resume at `accounts`, `income`, `obligations`, `budget`, `wait_salary`, `start_cycle`, or the live app after the profile has been synced.
+The browser-local shell database remains local and is not mirrored to Google. Cross-device resume is driven by the synced `profileManifest` settings record in the Drive vault. Onboarding commands update the local shell state and the manifest checkpoint together so another device can resume at `accounts`, `income`, `obligations`, `budget`, `wait_salary`, `start_cycle`, or the live app after the profile has been synced.
 
 The Continue-with-Google recovery flow is intentionally read-only until confirmation:
 
-1. Connect Google with the existing narrow scope.
-2. Search app-accessible spreadsheet metadata for Bluehour files, with Sheet URL/raw spreadsheet ID as a fallback.
-3. Read Sheet metadata, `Meta`, active slot, records, and the manifest.
+1. Connect Google with profile and Drive app-data scopes.
+2. Ensure the three hidden app-data files exist.
+3. Read the Drive vault manifest, active slot envelope, records, and synced profile manifest.
 4. Validate schemas and show counts/status without balances or transaction descriptions.
 5. Require confirmation before replacing local live data.
 6. Reconstruct live IndexedDB and shell state from the manifest.
 
-Legacy v1/v2/v3 Sheets without a manifest are inspected without mutation. The user must confirm the inferred lifecycle or choose a resume point before Bluehour writes a manifest in a staged push.
+Optional legacy v1/v2/v3 Sheets remain inspection/export sources, not the primary recovery path.
 
 ## Clock Model
 
@@ -59,11 +60,11 @@ Demo mode uses a deterministic clock. Live mode uses the current browser-local d
 
 - Starter live categories are production taxonomy records, not fictional financial records.
 - Demo mutations are local-only and never enter the sync outbox.
-- Google sync actions are disabled in demo before token request.
-- Google pushes use optimistic concurrency: the remote revision read immediately before push must match the expected revision. If it changed, Bluehour blocks the push and asks the user to check/pull/resolve first.
+- Google Drive vault actions are disabled in demo before token request.
+- Google pushes use optimistic concurrency: the Drive vault revision read immediately before push must match the expected revision. If it changed, Bluehour blocks the push and asks the user to check/pull/resolve first.
 - Profile IDs are merge boundaries. Matching IDs use the normal sync planner; different IDs require explicit replace or cancel.
 - Forecasting is split between the safe-to-spend reserve calculation and a pure projected cash-flow engine. Salary boundaries are represented as explicit projection segments so payday belongs to the future cycle.
-- Budget Coach is a pure domain recommendation engine under `src/domain/budgets`. React, IndexedDB, Google Sheets, and browser APIs only provide inputs, render explanations, and persist explicit user approvals.
+- Budget Coach is a pure domain recommendation engine under `src/domain/budgets`. React, IndexedDB, Google sync/export adapters, and browser APIs only provide inputs, render explanations, and persist explicit user approvals.
 - Budget Coach recommendations are transient. The app persists only coaching preferences inside the validated `preferences` setting and accepted allocation records after the user approves them.
 - Import duplicate review is durable domain data (`ImportRowAudit`), not a transient UI session. Every imported row receives an auditable outcome.
 - Main routes are lazy-loaded to keep the first Vite chunk below the warning threshold without changing `chunkSizeWarningLimit`.

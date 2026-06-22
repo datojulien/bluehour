@@ -16,30 +16,30 @@ Planned migration choices:
 
 Migration must validate every record before writing and must not overwrite either isolated profile silently.
 
-## Google Sheet Recovery
+## Google Drive Vault Recovery
 
-Google Sheet schema v3 uses active/inactive slots. If a staged push fails before `Meta.activeSlot` is updated, the former active slot remains readable.
+The Google Drive vault uses active/inactive slot files. If a staged push fails before `bluehour-manifest.json` is updated, the former active slot remains readable.
 
-If a Sheet is malformed or uses a newer unsupported schema, Bluehour refuses to replace valid local data and enters read-only recovery.
+If a Drive vault is malformed or uses a newer unsupported schema, Bluehour refuses to replace valid local data and enters read-only recovery.
 
 ## Continue With Google
 
-The welcome screen offers `Continue with Google`. This path never creates a new Sheet. It requires the user to:
+The welcome screen offers `Continue with Google`. This path signs into Google and uses hidden Drive app-data files:
 
 1. Sign in with Google.
-2. Let Bluehour search app-accessible spreadsheets for Bluehour files.
-3. Choose a found Sheet when more than one appears, or paste a full Sheet URL/raw spreadsheet ID as a fallback.
-4. Let Bluehour inspect metadata, `Meta`, active slot records, schema version, remote revision, record counts, and the profile manifest.
+2. Let Bluehour ensure the manifest and two slot files exist in `appDataFolder`.
+3. Let Bluehour inspect the manifest, active slot records, schema version, remote revision, record counts, and the profile manifest.
+4. If no vault exists, create the first staged Drive snapshot from this browser.
 5. Preview profile name, lifecycle, currency, last saved time, revision, and counts.
 6. Confirm local device setup before any local replacement.
 
 If the live profile on this device already contains meaningful records, Bluehour offers cancel/export/use local/replace choices in the UI and requires explicit replacement confirmation. Different profile IDs are never merged automatically.
 
-Remote restore is atomic from the user's perspective: validation happens before local replacement, downloaded data creates no outbox operations, the connection descriptor is saved locally, `syncState` records the remote revision, and shell state is reconstructed from the manifest.
+Remote restore is atomic from the user's perspective: validation happens before local replacement, downloaded data creates no outbox operations, the Drive connection descriptor is saved locally, `syncState` records the remote revision, and shell state is reconstructed from the manifest.
 
-## Legacy Sheet Recovery
+## Optional Legacy Sheet Inspection
 
-Legacy v1/v2/v3 Sheets may not contain a profile manifest. Bluehour can inspect them without writing, infer likely lifecycle from evidence, and ask the user to choose a resume point such as Accounts, Income, Obligations, Budget, Wait for salary, or live profile. A manifest is written only after explicit confirmation and a successful staged push.
+Legacy v1/v2/v3 Sheets may not contain a profile manifest. Bluehour keeps Sheet code for optional export and legacy inspection, but Sheets are not the primary recovery or sync source.
 
 ## Stale Device Recovery
 

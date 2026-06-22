@@ -53,7 +53,7 @@ interface BluehourDataContextValue {
   resetDemo: () => Promise<void>;
   returnToWelcome: () => Promise<void>;
   startLiveSetup: () => Promise<void>;
-  startExistingSheetRecovery: () => Promise<void>;
+  startGoogleRecovery: () => Promise<void>;
   setOnboardingStep: (step: OnboardingStep, state?: ApplicationState) => Promise<void>;
   saveRecordsAndAdvanceOnboarding: (mutations: LocalMutation[], step: OnboardingStep, state?: ApplicationState, label?: string) => Promise<void>;
   enterLiveMode: () => Promise<void>;
@@ -145,7 +145,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     setSnapshot(await loadProfileSnapshot("live"));
   }
 
-  async function startExistingSheetRecovery() {
+  async function startGoogleRecovery() {
     const nextShell = await saveShellState({
       activeProfile: undefined,
       applicationState: "connect_existing",
@@ -299,7 +299,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
       throw new Error("Bluehour is in read-only recovery. Google sync writes are paused.");
     }
     if (profileId === "demo") {
-      throw new Error("Demonstration data cannot be pushed to or pulled from Google Sheets");
+      throw new Error("Demonstration data cannot be pushed to or pulled from Google");
     }
 
     await applyRemoteSyncResult(profileId, args);
@@ -344,7 +344,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     resetDemo,
     returnToWelcome,
     startLiveSetup,
-    startExistingSheetRecovery,
+    startGoogleRecovery,
     setOnboardingStep,
     saveRecordsAndAdvanceOnboarding,
     enterLiveMode,

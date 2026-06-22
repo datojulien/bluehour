@@ -8,7 +8,7 @@ export async function openDemo(page: Page) {
 
 export async function completeLiveOnboarding(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Set up new finances/i }).click();
+  await page.getByRole("button", { name: /Set up locally first/i }).click();
   await page.getByRole("button", { name: /Defer Google for now/i }).click();
   await page.getByRole("button", { name: /Save preferences/i }).click();
 
@@ -71,4 +71,171 @@ export async function setGoogleSyncState(page: Page, status: string, message: st
       }),
     { status, message }
   );
+}
+
+export async function mockGoogleIdentity(page: Page) {
+  await page.addInitScript(() => {
+    window.google = {
+      accounts: {
+        oauth2: {
+          initTokenClient: (config) => ({
+            requestAccessToken: () => config.callback({ access_token: "mock-token" })
+          })
+        }
+      }
+    };
+  });
+  await page.route("https://openidconnect.googleapis.com/v1/userinfo", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sub: "google-subject",
+        email: "person@example.com",
+        name: "Example Person"
+      })
+    });
+  });
+}
+
+export async function mockDriveAppDataVault(
+  page: Page,
+  options: {
+    existingRemote?: boolean;
+    remoteRevision?: number;
+    onboardingStep?: string;
+  } = {}
+) {
+  const filesByName = new Map<string, string>();
+  const contents = new Map<string, unknown | "">();
+  const names = {
+    manifest: "bluehour-manifest.json",
+    slotA: "bluehour-slot-A.json",
+    slotB: "bluehour-slot-B.json"
+  };
+
+  function register(name: string, id: string, content: unknown | "" = "") {
+    filesByName.set(name, id);
+    contents.set(id, content);
+  }
+
+  if (options.existingRemote) {
+    const remoteRevision = options.remoteRevision ?? 14;
+    const profileId = "0f9a12be-2c61-4f29-8e36-8f9272aa8f39";
+    const exportedAt = "2026-06-22T09:42:00.000Z";
+    register(names.manifest, "drive-manifest-file", {
+      kind: "bluehour-drive-vault-manifest",
+      schemaVersion: 1,
+      remoteRevision,
+      activeSlot: "A",
+      profileId,
+      committedAt: exportedAt,
+      files: {
+        manifestFileId: "drive-manifest-file",
+        slotAFileId: "drive-slot-a-file",
+        slotBFileId: "drive-slot-b-file"
+      }
+    });
+    register(names.slotA, "drive-slot-a-file", {
+      kind: "bluehour-drive-vault-slot",
+      schemaVersion: 1,
+      remoteRevision,
+      profileId,
+      exportedAt,
+      appVersion: "1.0.0-rc.1",
+      snapshot: {
+        accounts: [
+          {
+            id: "remote-daily-current",
+            name: "Remote current account",
+            type: "bank",
+            role: "spendable",
+            trackingMode: "ledger",
+            currency: "MYR",
+            institutionLabel: "Remote Bank",
+            reconcileWeekly: true,
+            sortOrder: 1,
+            createdAt: exportedAt,
+            updatedAt: exportedAt,
+            archivedAt: null,
+            revision: 1
+          }
+        ],
+        settings: [
+          {
+            id: "settings-manifest",
+            key: "profileManifest",
+            valueJson: JSON.stringify({
+              manifestVersion: 1,
+              profileId,
+              profileName: "Personal finances",
+              currency: "MYR",
+              lifecycle: "setup",
+              onboardingStep: options.onboardingStep ?? "budget",
+              createdAt: exportedAt,
+              updatedAt: exportedAt,
+              createdByAppVersion: "1.0.0-rc.1"
+            }),
+            createdAt: exportedAt,
+            updatedAt: exportedAt,
+            archivedAt: null,
+            revision: 1
+          }
+        ]
+      }
+    });
+    register(names.slotB, "drive-slot-b-file", "");
+  }
+
+  await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files\?.*/, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET") {
+      const query = url.searchParams.get("q") ?? "";
+      const name = /name = '([^']+)'/.exec(query)?.[1];
+      const id = name ? filesByName.get(name) : undefined;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          files: id && name ? [{ id, name, modifiedTime: "2026-06-22T09:42:00.000Z" }] : []
+        })
+      });
+      return;
+    }
+
+    if (request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as { name?: string };
+      const name = body.name ?? `unnamed-${filesByName.size + 1}`;
+      const id =
+        name === names.manifest
+          ? "drive-manifest-file"
+          : name === names.slotA
+            ? "drive-slot-a-file"
+            : name === names.slotB
+              ? "drive-slot-b-file"
+              : `drive-file-${filesByName.size + 1}`;
+      register(name, id, "");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id, name }) });
+      return;
+    }
+
+    await route.fallback();
+  });
+
+  await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+\?alt=media/, async (route) => {
+    const fileId = decodeURIComponent(/\/files\/([^?]+)/.exec(route.request().url())?.[1] ?? "");
+    const content = contents.get(fileId) ?? "";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: typeof content === "string" ? content : JSON.stringify(content)
+    });
+  });
+
+  await page.route(/https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files\/[^?]+.*/, async (route) => {
+    const fileId = decodeURIComponent(/\/files\/([^?]+)/.exec(route.request().url())?.[1] ?? "");
+    contents.set(fileId, JSON.parse(route.request().postData() ?? "{}"));
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: fileId }) });
+  });
 }

@@ -14,8 +14,8 @@ const SettingsPage = lazy(() => import("../features/settings/SettingsPage").then
 const WelcomePage = lazy(() => import("../features/onboarding/WelcomePage").then((module) => ({ default: module.WelcomePage })));
 const OnboardingPage = lazy(() => import("../features/onboarding/OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
 const RecoveryStatePage = lazy(() => import("../features/recovery/RecoveryStatePage").then((module) => ({ default: module.RecoveryStatePage })));
-const ContinueExistingSheetPage = lazy(() =>
-  import("../features/recovery/ContinueExistingSheetPage").then((module) => ({ default: module.ContinueExistingSheetPage }))
+const ContinueWithGooglePage = lazy(() =>
+  import("../features/recovery/ContinueExistingSheetPage").then((module) => ({ default: module.ContinueWithGooglePage }))
 );
 
 export function App() {
@@ -26,7 +26,7 @@ export function App() {
   }
 
   if (applicationState === "connect_existing") {
-    return <Suspense fallback={<PageFallback />}><ContinueExistingSheetPage /></Suspense>;
+    return <Suspense fallback={<PageFallback />}><ContinueWithGooglePage /></Suspense>;
   }
 
   if (applicationState === "setup" || applicationState === "ready_for_salary") {

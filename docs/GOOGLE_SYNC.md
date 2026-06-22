@@ -1,78 +1,92 @@
 # Google Sync
 
-Google Sheets is an app-managed remote store for the live profile. Demo mode cannot create, push, pull, or sync a Google Sheet.
+Google Drive `appDataFolder` is the primary cross-browser remote store for the live profile. IndexedDB remains the working offline cache in each browser. Demo mode cannot create, push, pull, or sync a Drive vault.
+
+Google Sheets are optional export/inspection only. They are not used for login, onboarding, or daily sync.
 
 ## OAuth
 
 - Client ID comes from `VITE_GOOGLE_CLIENT_ID`.
-- The client ID is public configuration, not a secret.
-- The Google Cloud project must have both Google Sheets API and Google Drive API enabled.
-- Requested scope: `https://www.googleapis.com/auth/drive.file`.
-- Access tokens are kept in memory only and cleared after user-initiated actions.
-- Continue-with-Google discovery lists app-accessible spreadsheet file metadata (`id`, `name`, `modifiedTime`) through Drive before reading a chosen Sheet. It does not request broad Drive access.
+- The client ID is public browser configuration, not a secret.
+- Primary requested scopes: `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/drive.appdata`.
+- Optional Google Sheet export requests `https://www.googleapis.com/auth/drive.file` only when the user presses the export action.
+- Access tokens are kept in memory only and cleared after user-initiated Google actions.
+- Bluehour stores non-secret Google account metadata, Drive app-data file IDs, and remote revision details locally. It does not persist OAuth access tokens or refresh tokens.
 
-## Sheet Schema
+## Drive Vault Schema
 
-Current Google Sheet schema version: `3`.
+Current Drive vault schema version: `1`.
 
-Tabs:
+The vault uses three hidden Drive app-data files:
 
-- `Meta`
-- `A_Accounts` through `A_Settings`
-- `B_Accounts` through `B_Settings`
+- `bluehour-manifest.json`
+- `bluehour-slot-A.json`
+- `bluehour-slot-B.json`
 
-Schema v3 adds `ImportRowAudits` to both slots. v1 single-slot and v2 slot Sheets remain readable as migration sources in mocked tests; schema preparation adds missing v3 tabs without deleting legacy tabs or rows.
-
-The synced profile manifest is stored as a validated `profileManifest` row in the existing `Settings` tab. It does not require a new tab or schema version.
-
-`Meta` stores:
+`bluehour-manifest.json` stores:
 
 ```text
+kind
 schemaVersion
 remoteRevision
-exportedAt
 activeSlot
+profileId
+appVersion
 committedAt
 lastWrittenByDeviceId
+files
 ```
+
+Each slot stores a runtime-validated `BluehourSnapshot` subset with synced domain stores only. Outbox operations, conflicts, sync state, and shell state are local coordination data and are not uploaded as snapshot records.
+
+The synced profile manifest remains a validated `profileManifest` row in the existing `settings` store. It describes lifecycle and onboarding resume state without storing Google email, account numbers, device labels, hardware IDs, or IP addresses.
 
 ## Staged Push
 
 ```mermaid
 sequenceDiagram
   participant App
-  participant Sheet
-  App->>Sheet: Read Meta
-  App->>Sheet: Choose inactive slot
-  App->>Sheet: Clear inactive slot tabs
-  App->>Sheet: Write complete snapshot to inactive slot
-  App->>Sheet: Read inactive slot back
+  participant Drive
+  App->>Drive: Read manifest
+  App->>Drive: Choose inactive slot
+  App->>Drive: Write complete snapshot envelope to inactive slot
+  App->>Drive: Read inactive slot back
   App->>App: Validate runtime schemas and compare records
-  App->>Sheet: Write Meta.activeSlot and remoteRevision last
+  App->>Drive: Write manifest activeSlot and remoteRevision last
 ```
 
-If inactive-slot writing or verification fails, the previous active slot remains intact. `Meta.activeSlot` is written last.
+If inactive-slot writing or verification fails, the previous active slot remains intact. The manifest is written last.
 
-Before push, Bluehour compares the expected remote revision with the current `Meta.remoteRevision`. If the values differ, the push fails with `remote_revision_changed`; Bluehour must inspect the newer remote revision before any local outbox is pushed.
+Before push, Bluehour compares the expected remote revision with the current manifest revision. If the values differ, the push fails with `remote_revision_changed`; Bluehour must inspect the newer remote revision before any local outbox is pushed.
 
 ## Pull
 
-Pull reads `Meta`, selects `activeSlot`, reads only active-slot tabs, and deserializes them into domain-shaped records through runtime schemas. Unsupported newer schema versions enter read-only recovery rather than applying data locally.
+Pull reads the manifest, selects the active slot, reads that slot, and deserializes records through runtime schemas. Unsupported newer schema versions enter read-only recovery rather than applying data locally.
+
+On first sign-in from a new browser:
+
+1. Bluehour ensures the three app-data files exist.
+2. If the vault contains a profile, Bluehour validates it and atomically rebuilds `bluehour-profile-live` after confirmation when needed.
+3. If no vault exists and the browser has no meaningful live profile, Bluehour creates the live profile locally and writes the first staged snapshot to Drive.
+4. If local and remote profile IDs differ, automatic merge is blocked.
 
 ## Cross-Device Rules
 
 - The local `bluehour-shell` database is not uploaded.
 - The remote `profileManifest` describes lifecycle and onboarding resume state.
-- Possible local changes stay in the outbox until the user presses Sync now.
-- Check for changes reads remote metadata and records but never pushes.
-- Sync now pulls remote changes first when the remote revision advanced.
+- Possible local changes stay in the outbox until the user presses Sync Drive vault.
+- Sync reads remote metadata and records before pushing local outbox changes.
 - Non-conflicting remote changes apply locally while preserving local outbox changes.
 - Same-record concurrent edits create explicit conflicts that survive reload.
 - Different profile IDs block automatic merge.
-- Disconnecting one device clears the local connection descriptor and memory token only; it preserves local data, pending outbox changes, the remote Sheet, and other devices.
+- Disconnecting one browser clears the local connection descriptor and memory token only; it preserves local data, pending outbox changes, the remote Drive vault, and other browsers.
+
+## Optional Sheet Export
+
+Settings can create or update a Google Sheet for manual inspection. Sheet schema v3 still uses `Meta`, active/inactive tabs, runtime validation, and read-back comparison. Legacy v1 and v2 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
 
 ## Testing
 
-Automated tests use mocked fetch responses. No automated test requires real Google credentials.
+Automated tests use mocked Google Identity, Drive, and Sheets responses. No automated test requires real Google credentials.
 
-Real Google OAuth, deployed-origin authorization, and live Sheet A/B-slot observation remain manual release gates for stable `1.0.0`; see `docs/RC_CHECKLIST.md`.
+Real Google OAuth, deployed-origin authorization, and live Drive app-data vault observation remain manual release gates for stable `1.0.0`; see `docs/RC_CHECKLIST.md`.

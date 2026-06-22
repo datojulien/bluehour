@@ -1,19 +1,36 @@
 import { useState, type FormEvent } from "react";
-import { Copy, Download, KeyRound, Plus, RefreshCw, ShieldCheck, Unlink, Upload } from "lucide-react";
+import { Download, Plus, RefreshCw, ShieldCheck, Unlink, Upload } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { decryptBackup, encryptBackup, type EncryptedBackupEnvelope } from "../../data/backup/encryptedBackup";
-import { clearInMemoryGoogleAccessToken, requestGoogleAccessToken } from "../../data/google/googleAuth";
+import {
+  DRIVE_VAULT_SCHEMA_VERSION,
+  createDriveConnectionDescriptor,
+  driveVaultFilesFromDescriptor,
+  driveVaultFilesFromSyncState,
+  ensureDriveVaultFiles,
+  parseDriveConnectionDescriptor,
+  pushSnapshotToDriveVault,
+  readSnapshotFromDriveVault,
+  RemoteRevisionChangedError,
+  type DriveConnectionDescriptor,
+  type DriveVaultFiles
+} from "../../data/google/driveAppDataVault";
+import {
+  GOOGLE_SHEETS_SCOPES,
+  clearInMemoryGoogleAccessToken,
+  fetchGoogleAccountProfile,
+  requestGoogleAccessToken,
+  type GoogleAccountProfile
+} from "../../data/google/googleAuth";
 import {
   createBluehourSpreadsheet,
-  createConnectionDescriptor,
   ensureBluehourSheetSchema,
-  extractSpreadsheetId,
-  parseConnectionDescriptor
+  extractSpreadsheetId
 } from "../../data/google/googleSheetsAdapter";
-import { pushSnapshotToGoogleSheet, readSnapshotFromGoogleSheet, RemoteRevisionChangedError } from "../../data/google/sheetSerialization";
+import { pushSnapshotToGoogleSheet } from "../../data/google/sheetSerialization";
 import type { LocalMutation, MutableStoreName } from "../../data/local-db/localDb";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
-import { planGoogleSheetSync } from "../../data/sync/googleSync";
+import { planRemoteSnapshotSync } from "../../data/sync/remoteSync";
 import { toCsv } from "../../domain/imports/csv";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
@@ -24,7 +41,7 @@ import { readProfileManifest } from "../../domain/profileManifest";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 export function SettingsPage() {
-  const { snapshot, asOfDate, deviceIdentity, loading, error, saveRecord, saveRecords, restoreProfileSnapshot, applyRemoteSync, markSynced, isDemo, canUseGoogleSync } =
+  const { snapshot, asOfDate, deviceIdentity, loading, error, saveRecords, restoreProfileSnapshot, applyRemoteSync, isDemo, canUseGoogleSync } =
     useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
 
@@ -71,14 +88,8 @@ export function SettingsPage() {
           snapshot={snapshot}
           deviceId={deviceIdentity?.deviceId}
           canUseGoogleSync={canUseGoogleSync}
-          onSave={async (setting) => {
-            await saveRecord("settings", setting, "Google connection");
-            setMessage("Google connection descriptor saved locally. No token was stored.");
-          }}
-          onSaveRecords={saveRecords}
           onApplyRemoteSync={applyRemoteSync}
-          onMarkSynced={markSynced}
-          onPushed={() => setMessage("Local snapshot pushed to Google Sheet with RAW values.")}
+          onPushed={() => setMessage("Snapshot exported to Google Sheet with RAW values.")}
         />
       </section>
 
@@ -383,196 +394,200 @@ function GoogleSettings({
   snapshot,
   deviceId,
   canUseGoogleSync,
-  onSave,
-  onSaveRecords,
   onApplyRemoteSync,
-  onMarkSynced,
   onPushed
 }: {
   snapshot: BluehourSnapshot;
   deviceId?: string;
   canUseGoogleSync: boolean;
-  onSave: (setting: AppSettings) => Promise<void>;
-  onSaveRecords: (mutations: LocalMutation[], label?: string) => Promise<void>;
   onApplyRemoteSync: (args: {
     mutations: LocalMutation[];
     conflicts: ConflictRecord[];
     syncState: SyncState;
     clearOutbox: boolean;
   }) => Promise<void>;
-  onMarkSynced: (syncState: SyncState) => Promise<void>;
   onPushed: () => void;
 }) {
   const existing = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
   const manifest = readProfileManifest(snapshot.settings);
-  const existingValue = existing ? connectionDescriptorFromSetting(existing) : null;
+  const existingDriveValue = existing ? driveConnectionDescriptorFromSetting(existing) : null;
   const syncState = snapshot.syncState.find((state) => state.key === "google");
-  const [spreadsheetInput, setSpreadsheetInput] = useState(existingValue?.spreadsheetId ?? "");
+  const [spreadsheetInput, setSpreadsheetInput] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pendingLocalChanges = snapshot.outboxOperations.length;
   const openConflicts = snapshot.conflicts.filter((conflict) => conflict.status === "open").length;
+  const savedDriveFiles = existingDriveValue ? driveVaultFilesFromDescriptor(existingDriveValue) : driveVaultFilesFromSyncState(syncState);
 
-  async function saveSpreadsheetId(spreadsheetId: string) {
-    if (!canUseGoogleSync) {
-      throw new Error("Demonstration data cannot be connected to Google Sheets");
-    }
+  function driveDescriptorSetting(files: DriveVaultFiles, account: GoogleAccountProfile, remoteRevision: number, lastSuccessfulSyncAt?: string): AppSettings {
     if (!manifest) {
       throw new Error("Profile manifest is missing");
     }
-    const descriptor = createConnectionDescriptor(extractSpreadsheetId(spreadsheetId), {
+    const descriptor = createDriveConnectionDescriptor(files, {
       profileId: manifest.profileId,
-      lastKnownRemoteRevision: syncState?.remoteRevision ?? existingValue?.lastKnownRemoteRevision ?? 0,
-      lastSuccessfulSyncAt: syncState?.lastSyncedAt
+      googleSubject: account.sub,
+      googleEmail: account.email,
+      googleName: account.name,
+      lastKnownRemoteRevision: remoteRevision,
+      lastSuccessfulSyncAt
     });
-    const setting: AppSettings = existing
-      ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
+    const existingSetting = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
+    return existingSetting
+      ? { ...touchRecord(existingSetting), valueJson: JSON.stringify(descriptor) }
       : {
           ...createRecordMeta("settings"),
           key: "googleConnection",
           valueJson: JSON.stringify(descriptor)
         };
-    await onSave(setting);
   }
 
-  async function createSheet() {
+  function driveSyncState({
+    files,
+    account,
+    remoteRevision,
+    status: nextStatus,
+    message,
+    lastRemoteWriterDeviceId = syncState?.lastRemoteWriterDeviceId,
+    lastSyncedAt
+  }: {
+    files: DriveVaultFiles;
+    account: GoogleAccountProfile;
+    remoteRevision: number;
+    status: SyncState["status"];
+    message: string;
+    lastRemoteWriterDeviceId?: string;
+    lastSyncedAt?: string;
+  }): SyncState {
+    return {
+      key: "google",
+      provider: "drive_appdata",
+      status: nextStatus,
+      driveManifestFileId: files.manifestFileId,
+      driveSlotAFileId: files.slotAFileId,
+      driveSlotBFileId: files.slotBFileId,
+      googleSubject: account.sub,
+      googleEmail: account.email,
+      googleName: account.name,
+      profileId: manifest?.profileId,
+      remoteRevision,
+      lastSyncedAt,
+      lastRemoteWriterDeviceId,
+      message
+    };
+  }
+
+  async function connectOrSyncDriveVault() {
     setBusy(true);
     setStatus(null);
     try {
       if (!canUseGoogleSync) {
-        throw new Error("Demonstration data cannot create or sync a Google Sheet");
+        throw new Error("Demonstration data cannot be synced with Google Drive");
       }
       if (!GOOGLE_CLIENT_ID) {
-        throw new Error("Set VITE_GOOGLE_CLIENT_ID before creating a Google Sheet");
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Drive");
       }
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const spreadsheetId = await createBluehourSpreadsheet(token);
-      await saveSpreadsheetId(spreadsheetId);
-      setSpreadsheetInput(spreadsheetId);
-      setStatus("Google Sheet created. Press Sync now to commit this profile before using it on another device.");
-    } catch (caught) {
-      setStatus(caught instanceof Error ? caught.message : "Google connection failed");
-    } finally {
-      clearInMemoryGoogleAccessToken();
-      setBusy(false);
-    }
-  }
+      const account = await fetchGoogleAccountProfile(token);
+      const files = savedDriveFiles ?? (await ensureDriveVaultFiles(token));
+      const remote = await readSnapshotFromDriveVault(files, token);
+      const now = new Date().toISOString();
 
-  async function pushToSheet() {
-    setBusy(true);
-    setStatus(null);
-    try {
-      if (!canUseGoogleSync) {
-        throw new Error("Demonstration data cannot be pushed to Google Sheets");
+      if (!remote) {
+        await pushSnapshotToDriveVault(files, snapshot, token, fetch, 1, 0);
+        await onApplyRemoteSync({
+          mutations: [{ storeName: "settings", record: driveDescriptorSetting(files, account, 1, now), outbox: false }],
+          conflicts: [],
+          syncState: driveSyncState({
+            files,
+            account,
+            remoteRevision: 1,
+            status: "synced",
+            message: "Google Drive vault created and local profile pushed.",
+            lastRemoteWriterDeviceId: deviceId,
+            lastSyncedAt: now
+          }),
+          clearOutbox: true
+        });
+        setStatus("Google Drive vault created and local profile pushed.");
+        return;
       }
-      if (!GOOGLE_CLIENT_ID) {
-        throw new Error("Set VITE_GOOGLE_CLIENT_ID before pushing to Google Sheets");
-      }
-      const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
-      if (!spreadsheetId) {
-        throw new Error("Save or enter a spreadsheet ID first");
-      }
-      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      await ensureBluehourSheetSchema(spreadsheetId, token);
-      const expectedRemoteRevision = syncState?.remoteRevision ?? existingValue?.lastKnownRemoteRevision ?? 0;
-      const nextRemoteRevision = expectedRemoteRevision + 1;
-      await pushSnapshotToGoogleSheet(spreadsheetId, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
-      await onMarkSynced({
-        key: "google",
-        status: "synced",
-        spreadsheetId,
-        profileId: manifest?.profileId,
-        remoteRevision: nextRemoteRevision,
-        lastSyncedAt: new Date().toISOString(),
-        lastRemoteWriterDeviceId: deviceId,
-        message: "Local snapshot pushed to Google Sheet."
+
+      const plan = planRemoteSnapshotSync(snapshot, remote, {
+        supportedSchemaVersion: DRIVE_VAULT_SCHEMA_VERSION,
+        remoteLabel: "Google Drive vault"
       });
-      setStatus("Local snapshot pushed. Access token was cleared from memory after the action.");
-      onPushed();
-    } catch (caught) {
-      setStatus(syncFailureMessage(caught, "Google push failed"));
-    } finally {
-      clearInMemoryGoogleAccessToken();
-      setBusy(false);
-    }
-  }
-
-  async function syncNow() {
-    setBusy(true);
-    setStatus(null);
-    try {
-      if (!canUseGoogleSync) {
-        throw new Error("Demonstration data cannot be synced with Google Sheets");
-      }
-      if (!GOOGLE_CLIENT_ID) {
-        throw new Error("Set VITE_GOOGLE_CLIENT_ID before syncing Google Sheets");
-      }
-      const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
-      if (!spreadsheetId) {
-        throw new Error("Save or enter a spreadsheet ID first");
-      }
-      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const remote = await readSnapshotFromGoogleSheet(spreadsheetId, token);
-      const plan = planGoogleSheetSync(snapshot, remote);
-      const syncState = {
-        ...plan.syncState,
-        spreadsheetId,
-        profileId: manifest?.profileId,
-        lastRemoteWriterDeviceId: remote.lastWrittenByDeviceId
-      };
+      const baseState = driveSyncState({
+        files,
+        account,
+        remoteRevision: plan.remoteRevision,
+        status: plan.syncState.status,
+        message: plan.syncState.message ?? "Google Drive sync planned.",
+        lastRemoteWriterDeviceId: remote.lastWrittenByDeviceId,
+        lastSyncedAt: plan.syncState.lastSyncedAt
+      });
 
       if (plan.action === "push_local") {
-        await ensureBluehourSheetSchema(spreadsheetId, token);
-        await pushSnapshotToGoogleSheet(spreadsheetId, snapshot, token, fetch, plan.nextRemoteRevision, plan.remoteRevision);
-        await onMarkSynced({
-          ...syncState,
-          status: "synced",
-          remoteRevision: plan.nextRemoteRevision,
-          lastSyncedAt: new Date().toISOString(),
-          lastRemoteWriterDeviceId: deviceId,
-          message: "Local outbox pushed to Google Sheet."
-        });
-        setStatus("Local outbox pushed to Google Sheet.");
-      } else {
+        await pushSnapshotToDriveVault(files, snapshot, token, fetch, plan.nextRemoteRevision, plan.remoteRevision);
+        const syncedAt = new Date().toISOString();
         await onApplyRemoteSync({
-          mutations: plan.mutations,
-          conflicts: plan.conflicts,
-          syncState,
-          clearOutbox: plan.clearOutbox
+          mutations: [{ storeName: "settings", record: driveDescriptorSetting(files, account, plan.nextRemoteRevision, syncedAt), outbox: false }],
+          conflicts: [],
+          syncState: driveSyncState({
+            files,
+            account,
+            remoteRevision: plan.nextRemoteRevision,
+            status: "synced",
+            message: "Local outbox pushed to Google Drive vault.",
+            lastRemoteWriterDeviceId: deviceId,
+            lastSyncedAt: syncedAt
+          }),
+          clearOutbox: true
         });
-        setStatus(plan.syncState.message ?? "Sync complete.");
+        setStatus("Local outbox pushed to Google Drive vault.");
+        return;
       }
+
+      await onApplyRemoteSync({
+        mutations: [...plan.mutations, { storeName: "settings", record: driveDescriptorSetting(files, account, plan.remoteRevision, baseState.lastSyncedAt), outbox: false }],
+        conflicts: plan.conflicts,
+        syncState: baseState,
+        clearOutbox: plan.clearOutbox
+      });
+      setStatus(plan.syncState.message ?? "Google Drive sync complete.");
     } catch (caught) {
-      setStatus(syncFailureMessage(caught, "Google sync failed"));
+      setStatus(syncFailureMessage(caught, "Google Drive sync failed"));
     } finally {
       clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
 
-  async function checkForChanges() {
+  async function checkDriveVault() {
     setBusy(true);
     setStatus(null);
     try {
       if (!canUseGoogleSync) {
-        throw new Error("Demonstration data cannot be synced with Google Sheets");
+        throw new Error("Demonstration data cannot check Google Drive");
       }
       if (!GOOGLE_CLIENT_ID) {
-        throw new Error("Set VITE_GOOGLE_CLIENT_ID before checking Google Sheets");
-      }
-      const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
-      if (!spreadsheetId) {
-        throw new Error("Save or enter a spreadsheet ID first");
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before checking Google Drive");
       }
       const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const remote = await readSnapshotFromGoogleSheet(spreadsheetId, token);
-      const plan = planGoogleSheetSync(snapshot, remote);
-      const localRevision = syncState?.remoteRevision ?? 0;
+      const files = savedDriveFiles ?? (await ensureDriveVaultFiles(token));
+      const remote = await readSnapshotFromDriveVault(files, token);
+      if (!remote) {
+        setStatus("No Google Drive vault exists yet for this account. Sync now will create it.");
+        return;
+      }
+      const plan = planRemoteSnapshotSync(snapshot, remote, {
+        supportedSchemaVersion: DRIVE_VAULT_SCHEMA_VERSION,
+        remoteLabel: "Google Drive vault"
+      });
       const summary =
         plan.action === "no_op"
           ? "No remote changes."
           : plan.action === "apply_remote" && pendingLocalChanges > 0
-            ? "Both devices changed data. Sync now will pull remote changes first and keep local changes waiting."
+            ? "Both browsers changed data. Sync now will pull remote changes first and keep local changes waiting."
             : plan.action === "apply_remote"
               ? "Remote changes available."
               : plan.action === "conflict"
@@ -580,15 +595,13 @@ function GoogleSettings({
                 : plan.action === "cross_profile_blocked"
                   ? "Different remote profile ID. Automatic merge is blocked."
                   : plan.action === "read_only_recovery"
-                    ? "Remote Sheet requires read-only recovery."
-                    : remote.remoteRevision > localRevision
-                      ? "Remote changes available before local push."
-                      : pendingLocalChanges > 0
-                        ? "Local changes waiting."
-                        : "No remote changes.";
+                    ? "Remote Drive vault requires read-only recovery."
+                    : pendingLocalChanges > 0
+                      ? "Local changes waiting."
+                      : "Local profile should be pushed.";
       setStatus(`${summary} Remote revision ${remote.remoteRevision}.`);
     } catch (caught) {
-      setStatus(syncFailureMessage(caught, "Google check failed"));
+      setStatus(syncFailureMessage(caught, "Google Drive check failed"));
     } finally {
       clearInMemoryGoogleAccessToken();
       setBusy(false);
@@ -596,91 +609,66 @@ function GoogleSettings({
   }
 
   function downloadDescriptor() {
-    if (!manifest) {
-      setStatus("Profile manifest is missing.");
+    if (!existingDriveValue) {
+      setStatus("Connect Google Drive before downloading a descriptor.");
       return;
     }
-    const descriptor = createConnectionDescriptor(extractSpreadsheetId(spreadsheetInput), {
-      profileId: manifest.profileId,
-      lastKnownRemoteRevision: syncState?.remoteRevision ?? existingValue?.lastKnownRemoteRevision ?? 0,
-      lastSuccessfulSyncAt: syncState?.lastSyncedAt
-    });
-    downloadJson("bluehour-connection-descriptor.json", descriptor);
+    downloadJson("bluehour-google-drive-vault-descriptor.json", existingDriveValue);
   }
 
-  async function copyConnectionInfo() {
-    if (!spreadsheetInput) {
-      setStatus("Enter or create a Sheet first.");
-      return;
-    }
-    const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
-    const connectionLink = `${window.location.origin}${window.location.pathname}#connect=${spreadsheetId}`;
-    const text = [
-      "Moving from laptop to desktop",
-      "1. On this device, press Sync now and confirm Bluehour says Saved to Google.",
-      "2. On the other device, open the same hosted Bluehour app.",
-      "3. Choose Continue with Google.",
-      "4. Sign into the same Google account and let Bluehour find the Sheet.",
-      `Fallback Sheet ID if it does not appear: ${spreadsheetId}`,
-      `Fallback connection link: ${connectionLink}`,
-      "Google sign-in is still required; the ID and link are not authorisation."
-    ].join("\n");
-    await navigator.clipboard?.writeText(text);
-    setStatus("Connection instructions copied.");
-  }
-
-  async function disconnectDevice() {
-    if (!existing) {
-      setStatus("This device is not connected to a Google Sheet.");
-      return;
-    }
-    const archivedConnection = {
-      ...touchRecord(existing),
-      archivedAt: new Date().toISOString()
-    };
-    await onSaveRecords(
-      [
-        { storeName: "settings", record: archivedConnection, outbox: false },
-        {
-          storeName: "syncState",
-          record: {
-            key: "google",
-            status: "saved_locally",
-            message: pendingLocalChanges > 0 ? "Disconnected. Unsynchronised local changes remain only on this device." : "Disconnected. Local data was preserved."
-          },
-          outbox: false
-        }
-      ],
-      "Google disconnect"
-    );
-    clearInMemoryGoogleAccessToken();
-    setSpreadsheetInput("");
-    setStatus("This device was disconnected. Local data and the remote Sheet were preserved.");
-  }
-
-  async function prepareSheetSchema() {
+  async function exportToSheet() {
     setBusy(true);
     setStatus(null);
     try {
       if (!canUseGoogleSync) {
-        throw new Error("Demonstration data cannot prepare a Google Sheet");
+        throw new Error("Demonstration data cannot be exported to Google Sheets");
       }
       if (!GOOGLE_CLIENT_ID) {
-        throw new Error("Set VITE_GOOGLE_CLIENT_ID before preparing Google Sheets");
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before exporting to Google Sheets");
       }
-      const spreadsheetId = extractSpreadsheetId(spreadsheetInput);
-      if (!spreadsheetId) {
-        throw new Error("Save or enter a spreadsheet ID first");
-      }
-      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const missing = await ensureBluehourSheetSchema(spreadsheetId, token);
-      setStatus(missing.length === 0 ? "Google Sheet already has all Bluehour tabs." : `Added ${missing.length} missing Bluehour tabs.`);
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID, { scopes: GOOGLE_SHEETS_SCOPES });
+      const spreadsheetId = spreadsheetInput.trim() ? extractSpreadsheetId(spreadsheetInput) : await createBluehourSpreadsheet(token);
+      await ensureBluehourSheetSchema(spreadsheetId, token);
+      await pushSnapshotToGoogleSheet(spreadsheetId, snapshot, token);
+      setSpreadsheetInput(spreadsheetId);
+      setStatus("Snapshot exported to Google Sheets for inspection. Drive vault remains the sync source of truth.");
+      onPushed();
     } catch (caught) {
-      setStatus(caught instanceof Error ? caught.message : "Google schema preparation failed");
+      setStatus(syncFailureMessage(caught, "Google Sheet export failed"));
     } finally {
       clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
+  }
+
+  async function disconnectDevice() {
+    if (!existing) {
+      setStatus("This browser is not connected to a Google Drive vault.");
+      return;
+    }
+    const setting: AppSettings = existing
+      ? {
+          ...touchRecord(existing),
+          archivedAt: new Date().toISOString()
+        }
+      : {
+          ...createRecordMeta("settings"),
+          key: "googleConnection",
+          valueJson: "{}",
+          archivedAt: new Date().toISOString()
+        };
+    await onApplyRemoteSync({
+      mutations: [{ storeName: "settings", record: setting, outbox: false }],
+      conflicts: [],
+      syncState: {
+        key: "google",
+        status: "saved_locally",
+        message: pendingLocalChanges > 0 ? "Disconnected. Unsynchronised local changes remain only on this browser." : "Disconnected. Local data was preserved."
+      },
+      clearOutbox: false
+    });
+    clearInMemoryGoogleAccessToken();
+    setStatus("This browser was disconnected. Local data and the remote Drive vault were preserved.");
   }
 
   return (
@@ -688,16 +676,16 @@ function GoogleSettings({
       <div className="band-header">
         <div>
           <p className="eyebrow">Google</p>
-          <h2>Private Sheet connection</h2>
+          <h2>Drive vault sync</h2>
         </div>
       </div>
       <div className="stack-list">
         {!canUseGoogleSync ? <p className="form-note danger-text">Google sync is disabled for the fictional demonstration profile.</p> : null}
-        <p>Tokens are requested only after a user action and are kept in memory only.</p>
+        <p>Bluehour uses a hidden Google Drive app-data vault as the cross-browser source of truth. Tokens stay in memory only.</p>
         <div className="sync-summary-grid">
           <div>
-            <small>Connected Sheet</small>
-            <strong>{existingValue?.spreadsheetId ? shortId(existingValue.spreadsheetId) : "Not connected"}</strong>
+            <small>Google account</small>
+            <strong>{syncState?.googleEmail ?? existingDriveValue?.googleEmail ?? "Not connected"}</strong>
           </div>
           <div>
             <small>Profile ID</small>
@@ -708,12 +696,16 @@ function GoogleSettings({
             <strong>{deviceId ? shortId(deviceId) : "Creating"}</strong>
           </div>
           <div>
+            <small>Provider</small>
+            <strong>{syncState?.provider ?? existingDriveValue?.provider ?? "Local only"}</strong>
+          </div>
+          <div>
             <small>Local status</small>
             <strong>{syncState?.status ?? "saved_locally"}</strong>
           </div>
           <div>
             <small>Remote revision</small>
-            <strong>{syncState?.remoteRevision ?? existingValue?.lastKnownRemoteRevision ?? 0}</strong>
+            <strong>{syncState?.remoteRevision ?? existingDriveValue?.lastKnownRemoteRevision ?? 0}</strong>
           </div>
           <div>
             <small>Last sync</small>
@@ -728,58 +720,42 @@ function GoogleSettings({
             <strong>{openConflicts}</strong>
           </div>
           <div>
-            <small>Last remote writer</small>
-            <strong>{syncState?.lastRemoteWriterDeviceId ? shortId(syncState.lastRemoteWriterDeviceId) : "Unknown"}</strong>
-          </div>
-          <div>
-            <small>Cross-device recovery</small>
-            <strong>{existingValue ? "Enabled after sync" : "Local only"}</strong>
+            <small>Vault files</small>
+            <strong>{savedDriveFiles ? "Remembered" : "Not connected"}</strong>
           </div>
         </div>
-        <label>
-          Existing Sheet URL or ID
-          <input value={spreadsheetInput} onChange={(event) => setSpreadsheetInput(event.target.value)} />
-        </label>
         <div className="form-actions">
-          <button className="secondary-action" type="button" onClick={() => void saveSpreadsheetId(spreadsheetInput)} disabled={!canUseGoogleSync}>
-            <KeyRound size={16} aria-hidden="true" />
-            Save descriptor
-          </button>
-          <button className="secondary-action" type="button" onClick={downloadDescriptor} disabled={!spreadsheetInput || !canUseGoogleSync}>
-            <Download size={16} aria-hidden="true" />
-            Download descriptor
-          </button>
-          <button className="secondary-action" type="button" onClick={() => void copyConnectionInfo()} disabled={!spreadsheetInput || !canUseGoogleSync}>
-            <Copy size={16} aria-hidden="true" />
-            Copy Sheet connection information
-          </button>
-          <button className="primary-action" type="button" onClick={() => void createSheet()} disabled={busy || !canUseGoogleSync}>
-            Create Sheet
-          </button>
-          <button className="secondary-action" type="button" onClick={() => void prepareSheetSchema()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
-            Prepare tabs
-          </button>
-          <button className="secondary-action" type="button" onClick={() => void checkForChanges()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
+          <button className="primary-action" type="button" onClick={() => void connectOrSyncDriveVault()} disabled={busy || !canUseGoogleSync}>
             <RefreshCw size={16} aria-hidden="true" />
-            Check for changes
+            Sync Drive vault
           </button>
-          <button className="primary-action" type="button" onClick={() => void pushToSheet()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
-            Push local snapshot
+          <button className="secondary-action" type="button" onClick={() => void checkDriveVault()} disabled={busy || !canUseGoogleSync}>
+            Check vault
           </button>
-          <button className="primary-action" type="button" onClick={() => void syncNow()} disabled={busy || !spreadsheetInput || !canUseGoogleSync}>
-            Sync now
+          <button className="secondary-action" type="button" onClick={downloadDescriptor} disabled={!existingDriveValue || !canUseGoogleSync}>
+            <Download size={16} aria-hidden="true" />
+            Download vault descriptor
           </button>
           <button className="secondary-action danger-action" type="button" onClick={() => void disconnectDevice()} disabled={busy || !existing || !canUseGoogleSync}>
             <Unlink size={16} aria-hidden="true" />
-            Disconnect this device
+            Disconnect this browser
           </button>
         </div>
         <div className="continue-device-card">
-          <strong>Continue on another device</strong>
-          <p>
-            Sync this device first, then open the same hosted Bluehour app elsewhere and choose Continue with Google. Bluehour will look for the
-            Sheet this app can access; Google access still controls it.
-          </p>
+          <strong>Continue on another browser</strong>
+          <p>Sync this browser, then open the same hosted Bluehour app elsewhere and choose Continue with Google using the same Google account.</p>
+        </div>
+        <div className="continue-device-card">
+          <strong>Optional Google Sheet export</strong>
+          <p>Sheets are now for inspection/export only. They are not the primary sync source.</p>
+          <label>
+            Existing Sheet URL or ID
+            <input value={spreadsheetInput} onChange={(event) => setSpreadsheetInput(event.target.value)} />
+          </label>
+          <button className="secondary-action" type="button" onClick={() => void exportToSheet()} disabled={busy || !canUseGoogleSync}>
+            <Upload size={16} aria-hidden="true" />
+            {spreadsheetInput ? "Export to Sheet" : "Create Sheet export"}
+          </button>
         </div>
         {status ? <p className="form-note">{status}</p> : null}
       </div>
@@ -953,23 +929,11 @@ function prettyJson(json: string): string {
   }
 }
 
-function connectionDescriptorFromSetting(setting: AppSettings) {
+function driveConnectionDescriptorFromSetting(setting: AppSettings): DriveConnectionDescriptor | null {
   try {
-    return parseConnectionDescriptor(JSON.parse(setting.valueJson));
+    return parseDriveConnectionDescriptor(JSON.parse(setting.valueJson));
   } catch {
-    try {
-      const legacy = JSON.parse(setting.valueJson) as { spreadsheetId?: string; schemaVersion?: number };
-      return legacy.spreadsheetId
-        ? {
-            spreadsheetId: legacy.spreadsheetId,
-            sheetSchemaVersion: legacy.schemaVersion ?? 1,
-            profileId: "",
-            lastKnownRemoteRevision: 0
-          }
-        : null;
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 

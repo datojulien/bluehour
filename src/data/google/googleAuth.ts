@@ -1,4 +1,5 @@
-const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file";
+export const GOOGLE_DRIVE_VAULT_SCOPES = "openid email profile https://www.googleapis.com/auth/drive.appdata";
+export const GOOGLE_SHEETS_SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let inMemoryAccessToken: string | null = null;
 
@@ -35,7 +36,23 @@ export function clearInMemoryGoogleAccessToken(): void {
   inMemoryAccessToken = null;
 }
 
-export async function requestGoogleAccessToken(clientId: string): Promise<string> {
+export interface GoogleAccountProfile {
+  sub: string;
+  email?: string;
+  name?: string;
+  picture?: string;
+}
+
+export async function requestGoogleAccessToken(
+  clientId: string,
+  {
+    scopes = GOOGLE_DRIVE_VAULT_SCOPES,
+    prompt
+  }: {
+    scopes?: string;
+    prompt?: "consent" | "select_account" | "";
+  } = {}
+): Promise<string> {
   await loadGoogleIdentityScript();
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts.oauth2) {
@@ -45,7 +62,7 @@ export async function requestGoogleAccessToken(clientId: string): Promise<string
 
     const tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: GOOGLE_SCOPES,
+      scope: scopes,
       callback: (response) => {
         if (response.error || !response.access_token) {
           reject(new Error(response.error ?? "Google did not return an access token"));
@@ -56,8 +73,33 @@ export async function requestGoogleAccessToken(clientId: string): Promise<string
         resolve(response.access_token);
       }
     });
-    tokenClient.requestAccessToken({ prompt: "consent" });
+    tokenClient.requestAccessToken(prompt !== undefined ? { prompt } : undefined);
   });
+}
+
+export async function fetchGoogleAccountProfile(accessToken: string, fetcher: typeof fetch = fetch): Promise<GoogleAccountProfile> {
+  const response = await fetcher("https://openidconnect.googleapis.com/v1/userinfo", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Google account profile read failed");
+  }
+
+  const body = (await response.json()) as Partial<GoogleAccountProfile>;
+  if (!body.sub) {
+    throw new Error("Google did not return an account subject");
+  }
+
+  return {
+    sub: body.sub,
+    email: body.email,
+    name: body.name,
+    picture: body.picture
+  };
 }
 
 function loadGoogleIdentityScript(): Promise<void> {
