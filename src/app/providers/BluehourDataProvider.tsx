@@ -159,13 +159,14 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     if (snapshot && shellState?.activeProfile === "live" && isManifestStep(step)) {
       await putLocalRecords("live", [manifestMutation(snapshot, step, state, deviceIdentity?.deviceId)], "onboarding checkpoint");
     }
+    const nextSnapshot = await loadProfileSnapshot("live");
     const nextShell = await saveShellState({
       activeProfile: "live",
       applicationState: state,
       onboardingStep: step
     });
+    setSnapshot(nextSnapshot);
     setShellState(nextShell);
-    setSnapshot(await loadProfileSnapshot("live"));
   }
 
   async function saveRecordsAndAdvanceOnboarding(mutations: LocalMutation[], step: OnboardingStep, state: ApplicationState = "setup", label = "onboarding") {
@@ -177,26 +178,28 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
       throw new Error("Onboarding checkpoint is invalid");
     }
     await putLocalRecords("live", [...mutations, manifestMutation(snapshot, step, state, deviceIdentity?.deviceId)], label);
+    const nextSnapshot = await loadProfileSnapshot("live");
     const nextShell = await saveShellState({
       activeProfile: "live",
       applicationState: state,
       onboardingStep: step
     });
+    setSnapshot(nextSnapshot);
     setShellState(nextShell);
-    setSnapshot(await loadProfileSnapshot("live"));
   }
 
   async function enterLiveMode() {
     if (snapshot && shellState?.activeProfile === "live") {
       await putLocalRecords("live", [manifestMutation(snapshot, "start_cycle", "live", deviceIdentity?.deviceId)], "live profile start");
     }
+    const nextSnapshot = await loadProfileSnapshot("live");
     const nextShell = await saveShellState({
       activeProfile: "live",
       applicationState: "live",
       onboardingStep: "start_cycle"
     });
+    setSnapshot(nextSnapshot);
     setShellState(nextShell);
-    setSnapshot(await loadProfileSnapshot("live"));
   }
 
   function requireProfile(): ProfileId {
@@ -275,13 +278,14 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
 
   async function restoreRemoteProfile(restore: PreparedRemoteRestore) {
     await replaceProfileSnapshot("live", restore.snapshot);
+    const nextSnapshot = await loadProfileSnapshot("live");
     const nextShell = await saveShellState({
       activeProfile: "live",
       applicationState: restore.shell.applicationState,
       onboardingStep: restore.shell.onboardingStep
     });
+    setSnapshot(nextSnapshot);
     setShellState(nextShell);
-    setSnapshot(await loadProfileSnapshot("live"));
   }
 
   async function applyRemoteSync(args: {
