@@ -8,7 +8,6 @@ import {
   readSnapshotFromDriveVault
 } from "../../data/google/driveAppDataVault";
 import {
-  clearInMemoryGoogleAccessToken,
   fetchGoogleAccountProfile,
   requestGoogleAccessToken,
   type GoogleAccountProfile
@@ -82,7 +81,6 @@ export function ContinueWithGooglePage() {
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : "Google sign-in failed");
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
@@ -124,7 +122,6 @@ export function ContinueWithGooglePage() {
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : "Google Drive vault creation failed");
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
@@ -150,7 +147,6 @@ export function ContinueWithGooglePage() {
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : "Google Drive restore failed");
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }

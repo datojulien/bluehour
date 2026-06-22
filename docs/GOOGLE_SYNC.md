@@ -10,7 +10,7 @@ Google Sheets are optional export/inspection only. They are not used for login, 
 - The client ID is public browser configuration, not a secret.
 - Primary requested scopes: `openid`, `email`, `profile`, and `https://www.googleapis.com/auth/drive.appdata`.
 - Optional Google Sheet export requests `https://www.googleapis.com/auth/drive.file` only when the user presses the export action.
-- Access tokens are kept in memory only and cleared after user-initiated Google actions.
+- Access tokens are kept in memory only. They are reused inside the current tab for up to one hour, then discarded so the user must reconnect before automatic sync continues.
 - Bluehour stores non-secret Google account metadata, Drive app-data file IDs, and remote revision details locally. It does not persist OAuth access tokens or refresh tokens.
 
 ## Drive Vault Schema
@@ -74,12 +74,16 @@ On first sign-in from a new browser:
 
 - The local `bluehour-shell` database is not uploaded.
 - The remote `profileManifest` describes lifecycle and onboarding resume state.
-- Possible local changes stay in the outbox until the user presses Sync Drive vault.
+- Possible local changes stay in the outbox until a Google session is active. While the one-hour in-memory session is active, Bluehour automatically syncs queued live changes to the Drive vault.
 - Sync reads remote metadata and records before pushing local outbox changes.
 - Non-conflicting remote changes apply locally while preserving local outbox changes.
 - Same-record concurrent edits create explicit conflicts that survive reload.
 - Different profile IDs block automatic merge.
 - Disconnecting one browser clears the local connection descriptor and memory token only; it preserves local data, pending outbox changes, the remote Drive vault, and other browsers.
+
+## Session Gatekeeper
+
+Bluehour does not store refresh tokens. The current browser tab may reuse an access token in memory for up to one hour. After expiry, automatic sync pauses with a reconnection message. Pressing Sync Drive vault or Save progress to Google starts a new Google token request; if Google can satisfy it from the browser's existing Google session, the user may not need to choose the account again.
 
 ## Optional Sheet Export
 

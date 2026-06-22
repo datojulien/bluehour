@@ -1,5 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 
+declare global {
+  interface Window {
+    __bluehourGoogleTokenRequests?: number;
+  }
+}
+
 export async function openDemo(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: /Explore demonstration/i }).click();
@@ -79,7 +85,10 @@ export async function mockGoogleIdentity(page: Page) {
       accounts: {
         oauth2: {
           initTokenClient: (config) => ({
-            requestAccessToken: () => config.callback({ access_token: "mock-token" })
+            requestAccessToken: () => {
+              window.__bluehourGoogleTokenRequests = (window.__bluehourGoogleTokenRequests ?? 0) + 1;
+              config.callback({ access_token: "mock-token", expires_in: 3600 });
+            }
           })
         }
       }

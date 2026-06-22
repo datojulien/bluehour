@@ -8,7 +8,7 @@ import {
   parseDriveConnectionDescriptor,
   pushSnapshotToDriveVault
 } from "../../data/google/driveAppDataVault";
-import { clearInMemoryGoogleAccessToken, fetchGoogleAccountProfile, requestGoogleAccessToken } from "../../data/google/googleAuth";
+import { fetchGoogleAccountProfile, requestGoogleAccessToken } from "../../data/google/googleAuth";
 import { loadLiveSnapshot } from "../../data/local-db/localDb";
 import { createStarterCategories } from "../../domain/categories/starterCategories";
 import { formatDisplayDate } from "../../domain/dates";
@@ -103,52 +103,48 @@ export function OnboardingPage() {
       throw new Error("Restart the Vite dev server after adding VITE_GOOGLE_CLIENT_ID to .env");
     }
 
-    try {
-      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-      const account = await fetchGoogleAccountProfile(token);
-      const files = await ensureDriveVaultFiles(token);
-      const manifest = snapshot ? readProfileManifest(snapshot.settings) : null;
-      if (!manifest) {
-        throw new Error("Profile manifest is not ready yet");
-      }
-      const descriptor = createDriveConnectionDescriptor(files, {
-        profileId: manifest.profileId,
-        googleSubject: account.sub,
-        googleEmail: account.email,
-        googleName: account.name
-      });
-      const existing = snapshot?.settings.find((setting) => setting.key === "googleConnection");
-      const setting: AppSettings = existing
-        ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
-        : {
-            ...createRecordMeta("settings"),
-            key: "googleConnection",
-            valueJson: JSON.stringify(descriptor)
-          };
-
-      await saveRecordsAndAdvanceOnboarding([{ storeName: "settings", record: setting }], "preferences", "setup", "Google connection");
-      const updatedSnapshot = await loadLiveSnapshot();
-      const nextRemoteRevision = 1;
-      await pushSnapshotToDriveVault(files, updatedSnapshot, token, fetch, nextRemoteRevision, 0);
-      await markSynced({
-        key: "google",
-        provider: "drive_appdata",
-        status: "synced",
-        driveManifestFileId: files.manifestFileId,
-        driveSlotAFileId: files.slotAFileId,
-        driveSlotBFileId: files.slotBFileId,
-        googleSubject: account.sub,
-        googleEmail: account.email,
-        googleName: account.name,
-        profileId: manifest.profileId,
-        remoteRevision: nextRemoteRevision,
-        lastSyncedAt: new Date().toISOString(),
-        message: "Google Drive vault created. This setup is available on your other browsers."
-      });
-      setMessage("Google Drive vault created. This setup is available on your other browsers.");
-    } finally {
-      clearInMemoryGoogleAccessToken();
+    const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+    const account = await fetchGoogleAccountProfile(token);
+    const files = await ensureDriveVaultFiles(token);
+    const manifest = snapshot ? readProfileManifest(snapshot.settings) : null;
+    if (!manifest) {
+      throw new Error("Profile manifest is not ready yet");
     }
+    const descriptor = createDriveConnectionDescriptor(files, {
+      profileId: manifest.profileId,
+      googleSubject: account.sub,
+      googleEmail: account.email,
+      googleName: account.name
+    });
+    const existing = snapshot?.settings.find((setting) => setting.key === "googleConnection");
+    const setting: AppSettings = existing
+      ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
+      : {
+          ...createRecordMeta("settings"),
+          key: "googleConnection",
+          valueJson: JSON.stringify(descriptor)
+        };
+
+    await saveRecordsAndAdvanceOnboarding([{ storeName: "settings", record: setting }], "preferences", "setup", "Google connection");
+    const updatedSnapshot = await loadLiveSnapshot();
+    const nextRemoteRevision = 1;
+    await pushSnapshotToDriveVault(files, updatedSnapshot, token, fetch, nextRemoteRevision, 0);
+    await markSynced({
+      key: "google",
+      provider: "drive_appdata",
+      status: "synced",
+      driveManifestFileId: files.manifestFileId,
+      driveSlotAFileId: files.slotAFileId,
+      driveSlotBFileId: files.slotBFileId,
+      googleSubject: account.sub,
+      googleEmail: account.email,
+      googleName: account.name,
+      profileId: manifest.profileId,
+      remoteRevision: nextRemoteRevision,
+      lastSyncedAt: new Date().toISOString(),
+      message: "Google Drive vault created. This setup is available on your other browsers."
+    });
+    setMessage("Google Drive vault created. This setup is available on your other browsers.");
   }
 
   async function saveProgressToGoogle() {
@@ -164,30 +160,26 @@ export function OnboardingPage() {
     }
     const descriptor = parseDriveConnectionDescriptor(JSON.parse(connection.valueJson));
     const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
-    try {
-      const expectedRemoteRevision = snapshot.syncState.find((state) => state.key === "google")?.remoteRevision ?? descriptor.lastKnownRemoteRevision;
-      const nextRemoteRevision = expectedRemoteRevision + 1;
-      const files = driveVaultFilesFromDescriptor(descriptor);
-      await pushSnapshotToDriveVault(files, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
-      await markSynced({
-        key: "google",
-        provider: "drive_appdata",
-        status: "synced",
-        driveManifestFileId: descriptor.driveManifestFileId,
-        driveSlotAFileId: descriptor.driveSlotAFileId,
-        driveSlotBFileId: descriptor.driveSlotBFileId,
-        googleSubject: descriptor.googleSubject,
-        googleEmail: descriptor.googleEmail,
-        googleName: descriptor.googleName,
-        profileId: descriptor.profileId,
-        remoteRevision: nextRemoteRevision,
-        lastSyncedAt: new Date().toISOString(),
-        message: "Saved to Google Drive. This progress is available on your other browsers."
-      });
-      setMessage("Saved to Google Drive. This progress is available on your other browsers.");
-    } finally {
-      clearInMemoryGoogleAccessToken();
-    }
+    const expectedRemoteRevision = snapshot.syncState.find((state) => state.key === "google")?.remoteRevision ?? descriptor.lastKnownRemoteRevision;
+    const nextRemoteRevision = expectedRemoteRevision + 1;
+    const files = driveVaultFilesFromDescriptor(descriptor);
+    await pushSnapshotToDriveVault(files, snapshot, token, fetch, nextRemoteRevision, expectedRemoteRevision);
+    await markSynced({
+      key: "google",
+      provider: "drive_appdata",
+      status: "synced",
+      driveManifestFileId: descriptor.driveManifestFileId,
+      driveSlotAFileId: descriptor.driveSlotAFileId,
+      driveSlotBFileId: descriptor.driveSlotBFileId,
+      googleSubject: descriptor.googleSubject,
+      googleEmail: descriptor.googleEmail,
+      googleName: descriptor.googleName,
+      profileId: descriptor.profileId,
+      remoteRevision: nextRemoteRevision,
+      lastSyncedAt: new Date().toISOString(),
+      message: "Saved to Google Drive. This progress is available on your other browsers."
+    });
+    setMessage("Saved to Google Drive. This progress is available on your other browsers.");
   }
 
   return (

@@ -141,7 +141,7 @@ Optional Google Sheet export requests this scope only when the export button is 
 https://www.googleapis.com/auth/drive.file
 ```
 
-Access tokens are memory-only and are cleared after user-initiated actions. Bluehour stores only non-secret Google account metadata, Drive app-data file IDs, and remote revision details locally.
+Access tokens are memory-only. Bluehour reuses a token inside the current tab for up to one hour, then requires Google reconnection before automatic sync continues. Tokens are never written to IndexedDB, localStorage, sessionStorage, backups, Drive, or Sheets. Bluehour stores only non-secret Google account metadata, Drive app-data file IDs, and remote revision details locally.
 
 ## Google Drive Vault Storage
 
@@ -163,12 +163,12 @@ Cross-device recovery uses a typed `profileManifest` settings record synced with
 
 Each browser also has a random local device ID stored only in `bluehour-shell`. The optional local label stays local. The device ID is diagnostic metadata only, not authentication.
 
-Before pushing, Bluehour reads the current Drive vault revision and blocks stale-device writes when the remote profile has advanced. Sync then pulls non-conflicting remote changes, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
+Before pushing, Bluehour reads the current Drive vault revision and blocks stale-device writes when the remote profile has advanced. While a memory-only Google session is active, local live changes are queued and then pushed automatically. Sync pulls non-conflicting remote changes first, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
 
 Moving from laptop to desktop:
 
 1. On the laptop, choose Continue with Google or connect Google in Settings.
-2. Press Save progress to Google or Sync Drive vault.
+2. Press Save progress to Google or Sync Drive vault once to start the one-hour in-memory session.
 3. Confirm the app says Saved to Google Drive.
 4. On the desktop, open Bluehour.
 5. Choose Continue with Google.

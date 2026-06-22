@@ -19,6 +19,7 @@ import {
   GOOGLE_SHEETS_SCOPES,
   clearInMemoryGoogleAccessToken,
   fetchGoogleAccountProfile,
+  getInMemoryGoogleSession,
   requestGoogleAccessToken,
   type GoogleAccountProfile
 } from "../../data/google/googleAuth";
@@ -418,6 +419,7 @@ function GoogleSettings({
   const pendingLocalChanges = snapshot.outboxOperations.length;
   const openConflicts = snapshot.conflicts.filter((conflict) => conflict.status === "open").length;
   const savedDriveFiles = existingDriveValue ? driveVaultFilesFromDescriptor(existingDriveValue) : driveVaultFilesFromSyncState(syncState);
+  const googleSession = getInMemoryGoogleSession();
 
   function driveDescriptorSetting(files: DriveVaultFiles, account: GoogleAccountProfile, remoteRevision: number, lastSuccessfulSyncAt?: string): AppSettings {
     if (!manifest) {
@@ -557,7 +559,6 @@ function GoogleSettings({
     } catch (caught) {
       setStatus(syncFailureMessage(caught, "Google Drive sync failed"));
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
@@ -603,7 +604,6 @@ function GoogleSettings({
     } catch (caught) {
       setStatus(syncFailureMessage(caught, "Google Drive check failed"));
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
@@ -636,7 +636,6 @@ function GoogleSettings({
     } catch (caught) {
       setStatus(syncFailureMessage(caught, "Google Sheet export failed"));
     } finally {
-      clearInMemoryGoogleAccessToken();
       setBusy(false);
     }
   }
@@ -681,7 +680,10 @@ function GoogleSettings({
       </div>
       <div className="stack-list">
         {!canUseGoogleSync ? <p className="form-note danger-text">Google sync is disabled for the fictional demonstration profile.</p> : null}
-        <p>Bluehour uses a hidden Google Drive app-data vault as the cross-browser source of truth. Tokens stay in memory only.</p>
+        <p>
+          Bluehour uses a hidden Google Drive app-data vault as the cross-browser source of truth. Tokens stay in memory only for this tab and
+          expire after one hour; local changes auto-sync while the session is active.
+        </p>
         <div className="sync-summary-grid">
           <div>
             <small>Google account</small>
@@ -722,6 +724,10 @@ function GoogleSettings({
           <div>
             <small>Vault files</small>
             <strong>{savedDriveFiles ? "Remembered" : "Not connected"}</strong>
+          </div>
+          <div>
+            <small>Session</small>
+            <strong>{googleSession ? `Active until ${formatSessionExpiry(googleSession.expiresAt)}` : "Reconnect when syncing"}</strong>
           </div>
         </div>
         <div className="form-actions">
@@ -946,6 +952,13 @@ function syncFailureMessage(caught: unknown, fallback: string): string {
 
 function shortId(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function formatSessionExpiry(expiresAt: number): string {
+  return new Date(expiresAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function downloadJson(fileName: string, value: unknown) {

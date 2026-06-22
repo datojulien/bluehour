@@ -448,6 +448,7 @@ export async function putLocalRecords(profileId: ProfileId, mutations: readonly 
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
   const now = new Date().toISOString();
   const shouldQueueOutbox = profileId === "live";
+  const previousSyncState = await tx.objectStore("syncState").get("google");
 
   for (const mutation of mutations) {
     await tx.objectStore(mutation.storeName).put(mutation.record as never);
@@ -468,6 +469,7 @@ export async function putLocalRecords(profileId: ProfileId, mutations: readonly 
   }
 
   await tx.objectStore("syncState").put({
+    ...previousSyncState,
     key: "google",
     status: profileId === "demo" ? "demo" : "waiting_to_sync",
     message:
@@ -482,6 +484,7 @@ export async function putLocalRecords(profileId: ProfileId, mutations: readonly 
 export async function archiveLocalRecord(profileId: ProfileId, storeName: DomainStoreName, recordId: string): Promise<void> {
   const db = await openBluehourDb(profileId);
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
+  const previousSyncState = await tx.objectStore("syncState").get("google");
   const store = tx.objectStore(storeName);
   const current = (await store.get(recordId)) as ({ id: string; archivedAt?: string | null; updatedAt?: string; revision?: number } | undefined);
   if (!current) {
@@ -508,6 +511,7 @@ export async function archiveLocalRecord(profileId: ProfileId, storeName: Domain
     } satisfies OutboxOperation);
   }
   await tx.objectStore("syncState").put({
+    ...previousSyncState,
     key: "google",
     status: profileId === "demo" ? "demo" : "waiting_to_sync",
     message: profileId === "demo" ? "Demo archive saved locally. Google sync is disabled." : "Archive saved locally and waiting to sync."

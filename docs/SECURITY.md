@@ -6,7 +6,7 @@ Bluehour is a static browser app. The deployed app code is public. The user's fi
 
 - No analytics, telemetry, or remote error reporting.
 - No bank credentials, account numbers, card numbers, passwords, or Google secrets are requested.
-- Google access tokens are memory-only and are not written to IndexedDB, localStorage, sessionStorage, URLs, Drive vault files, optional Sheets, logs, or repository files.
+- Google access tokens are memory-only for the current tab, capped at about one hour, and are not written to IndexedDB, localStorage, sessionStorage, URLs, Drive vault files, optional Sheets, logs, or repository files.
 - Continue-with-Google uses OpenID profile metadata plus the `drive.appdata` scope to find or create hidden app-data files. It does not request broad visible-Drive access.
 - Drive app-data file IDs and optional Sheet IDs are not passwords or authorization. Google access still controls the remote files.
 - Local device IDs are random UUIDs stored in `bluehour-shell`. They are not derived from hardware and are not authentication.
@@ -15,6 +15,7 @@ Bluehour is a static browser app. The deployed app code is public. The user's fi
 - Budget Coach runs entirely in the browser against local data. It does not call AI services, advice APIs, analytics, telemetry, remote logging, or external financial-data services.
 - Budget Coach is educational budgeting guidance only. It must not be represented as investment, tax, legal, credit, or regulated financial advice.
 - Continue-with-Google inspection does not replace a meaningful local profile until the user confirms restore/replacement.
+- Automatic sync uses only a currently valid in-memory token. When the one-hour gate expires, sync pauses until the user reconnects with Google.
 
 ## Local Security Boundary
 

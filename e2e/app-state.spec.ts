@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mockDriveAppDataVault, mockGoogleIdentity } from "./helpers";
+import { completeLiveOnboarding, getStoreRecords, mockDriveAppDataVault, mockGoogleIdentity } from "./helpers";
 
 test("fresh launch shows the welcome chooser", async ({ page }) => {
   await page.goto("/");
@@ -42,6 +42,29 @@ test("live setup starts empty and uses the current setup flow", async ({ page })
   await expect(page.getByText("Live setup")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Google", exact: true })).toBeVisible();
   await expect(page.getByText(/Vista Heights|Banyan Market|Orchid Stream/)).toHaveCount(0);
+});
+
+test("live changes auto-sync during an active Google session", async ({ page }) => {
+  await mockGoogleIdentity(page);
+  await mockDriveAppDataVault(page);
+  await completeLiveOnboarding(page);
+  await page.goto("/#/settings");
+  await page.getByRole("button", { name: /Sync Drive vault/i }).click();
+  await expect(page.getByRole("main").getByText(/Google Drive vault created and local profile pushed/i)).toBeVisible();
+  await expect(page.getByText(/Active until/i)).toBeVisible();
+  const tokenRequestsAfterManualSync = await page.evaluate(() => window.__bluehourGoogleTokenRequests ?? 0);
+
+  await page.goto("/#/transactions?new=1");
+  await page.getByLabel("Description").fill("Session auto-sync coffee");
+  await page.getByLabel("Amount").fill("8.80");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  await expect.poll(async () => (await getStoreRecords(page, "bluehour-profile-live", "outboxOperations")).length).toBe(0);
+  await expect.poll(async () => (await getStoreRecords<{ status: string; message?: string }>(page, "bluehour-profile-live", "syncState"))[0]?.status).toBe("synced");
+  await expect
+    .poll(async () => (await getStoreRecords<{ status: string; message?: string }>(page, "bluehour-profile-live", "syncState"))[0]?.message)
+    .toContain("Auto-synced to Google Drive");
+  expect(await page.evaluate(() => window.__bluehourGoogleTokenRequests ?? 0)).toBe(tokenRequestsAfterManualSync);
 });
 
 test("mobile navigation exposes remaining destinations through More", async ({ page }) => {

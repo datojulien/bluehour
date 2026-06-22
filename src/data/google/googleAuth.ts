@@ -1,10 +1,21 @@
 export const GOOGLE_DRIVE_VAULT_SCOPES = "openid email profile https://www.googleapis.com/auth/drive.appdata";
 export const GOOGLE_SHEETS_SCOPES = "https://www.googleapis.com/auth/drive.file";
 
-let inMemoryAccessToken: string | null = null;
+const GOOGLE_SESSION_MAX_MS = 60 * 60 * 1000;
+const GOOGLE_SESSION_SAFETY_MARGIN_MS = 30 * 1000;
+
+interface GoogleAccessTokenSession {
+  accessToken: string;
+  scopes: string;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+const inMemorySessions = new Map<string, GoogleAccessTokenSession>();
 
 interface GoogleTokenResponse {
   access_token?: string;
+  expires_in?: number | string;
   error?: string;
 }
 
@@ -28,12 +39,32 @@ declare global {
   }
 }
 
-export function getInMemoryGoogleAccessToken(): string | null {
-  return inMemoryAccessToken;
+export function getInMemoryGoogleAccessToken(scopes = GOOGLE_DRIVE_VAULT_SCOPES): string | null {
+  return getInMemoryGoogleSession(scopes)?.accessToken ?? null;
 }
 
-export function clearInMemoryGoogleAccessToken(): void {
-  inMemoryAccessToken = null;
+export function getInMemoryGoogleSession(scopes = GOOGLE_DRIVE_VAULT_SCOPES): GoogleAccessTokenSession | null {
+  const key = scopeKey(scopes);
+  const session = inMemorySessions.get(key);
+  if (!session) {
+    return null;
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    inMemorySessions.delete(key);
+    return null;
+  }
+
+  return session;
+}
+
+export function clearInMemoryGoogleAccessToken(scopes?: string): void {
+  if (scopes) {
+    inMemorySessions.delete(scopeKey(scopes));
+    return;
+  }
+
+  inMemorySessions.clear();
 }
 
 export interface GoogleAccountProfile {
@@ -47,12 +78,21 @@ export async function requestGoogleAccessToken(
   clientId: string,
   {
     scopes = GOOGLE_DRIVE_VAULT_SCOPES,
-    prompt
+    prompt,
+    forceRefresh = false
   }: {
     scopes?: string;
     prompt?: "consent" | "select_account" | "";
+    forceRefresh?: boolean;
   } = {}
 ): Promise<string> {
+  if (!forceRefresh && prompt === undefined) {
+    const existing = getInMemoryGoogleAccessToken(scopes);
+    if (existing) {
+      return existing;
+    }
+  }
+
   await loadGoogleIdentityScript();
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts.oauth2) {
@@ -69,7 +109,7 @@ export async function requestGoogleAccessToken(
           return;
         }
 
-        inMemoryAccessToken = response.access_token;
+        rememberAccessToken(scopes, response);
         resolve(response.access_token);
       }
     });
@@ -100,6 +140,35 @@ export async function fetchGoogleAccountProfile(accessToken: string, fetcher: ty
     name: body.name,
     picture: body.picture
   };
+}
+
+function rememberAccessToken(scopes: string, response: GoogleTokenResponse): void {
+  if (!response.access_token) {
+    return;
+  }
+
+  const issuedAt = Date.now();
+  const expiresInSeconds = Number(response.expires_in ?? 3600);
+  const boundedExpiresInMs = Math.min(
+    Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds * 1000 : GOOGLE_SESSION_MAX_MS,
+    GOOGLE_SESSION_MAX_MS
+  );
+  const expiresAt = issuedAt + Math.max(0, boundedExpiresInMs - GOOGLE_SESSION_SAFETY_MARGIN_MS);
+  inMemorySessions.set(scopeKey(scopes), {
+    accessToken: response.access_token,
+    scopes,
+    issuedAt,
+    expiresAt
+  });
+}
+
+function scopeKey(scopes: string): string {
+  return scopes
+    .split(/\s+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .sort()
+    .join(" ");
 }
 
 function loadGoogleIdentityScript(): Promise<void> {

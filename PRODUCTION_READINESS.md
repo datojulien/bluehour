@@ -20,7 +20,7 @@ The local verification attempt on 22/06/2026 passed lint, unit tests, coverage, 
 
 Google-only browser login and Drive app-data vault synchronisation have been added and passed the automated verification suite listed below.
 
-The implementation adds Google Sign-In profile metadata, memory-only access tokens, a hidden Drive app-data vault with manifest-last staged writes, profile-ID merge blocking, Settings Drive vault controls, local-only onboarding status, and optional Google Sheet export for inspection. It still requires real Google laptop-to-desktop verification before stable production use.
+The implementation adds Google Sign-In profile metadata, one-hour memory-only access-token reuse, automatic in-session Drive vault sync, a hidden Drive app-data vault with manifest-last staged writes, profile-ID merge blocking, Settings Drive vault controls, local-only onboarding status, and optional Google Sheet export for inspection. It still requires real Google laptop-to-desktop verification before stable production use.
 
 ## Verified Automated Gates
 
@@ -28,11 +28,11 @@ These commands were run locally from a clean dependency install during this pass
 
 - `npm ci`: passed, 262 packages installed, 0 vulnerabilities.
 - `npm run lint`: passed.
-- `npm test`: passed, 27 test files and 142 tests.
-- `npm run test:coverage`: passed, 82.13% statements, 71.1% branches, 88.19% functions, 81.88% lines.
+- `npm test`: passed, 27 test files and 145 tests.
+- `npm run test:coverage`: passed, 83.55% statements, 71.4% branches, 88.27% functions, 83.4% lines.
 - `npm run typecheck`: passed.
-- `npm run build`: passed, no Vite main-chunk warning; route-level lazy loading keeps the main app chunk at 368.94 kB.
-- `npm run test:e2e`: passed, 51 browser tests and 72 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
+- `npm run build`: passed, no Vite main-chunk warning; route-level lazy loading keeps the main app chunk at 388.23 kB.
+- `npm run test:e2e`: passed, 54 browser tests and 72 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
 
 ## Completed In `1.0.0-rc.1`
 
@@ -62,6 +62,8 @@ These commands were run locally from a clean dependency install during this pass
 - [x] Preserved staged Google remote writes with inactive-slot writes, full read-back, runtime validation, round-trip comparison, and commit metadata written last.
 - [x] Added mocked Google schema round-trip and migration-source tests for the audit model.
 - [x] Added Google Sign-In profile metadata with Drive app-data scope and no persisted OAuth tokens.
+- [x] Added memory-only token reuse for the current tab with a one-hour reconnection gate.
+- [x] Added automatic Drive vault sync for queued live changes while the in-memory Google session is active.
 - [x] Added hidden Drive vault files for `bluehour-manifest.json`, `bluehour-slot-A.json`, and `bluehour-slot-B.json`.
 - [x] Refactored the sync planner around provider-neutral remote snapshots while keeping Google Sheets as optional export/inspection.
 - [x] Added mocked Drive vault tests for staged writes, unsupported-schema recovery, profile restore, and browser login flows.

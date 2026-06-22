@@ -74,6 +74,55 @@ describe("local IndexedDB repository", () => {
     expect(demo.accounts.map((record) => record.name)).not.toContain("Live current account");
   });
 
+  it("preserves Drive sync metadata when queuing a local live change", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    const snapshot = await loadLiveSnapshot();
+    await replaceProfileSnapshot("live", {
+      ...snapshot,
+      syncState: [
+        {
+          key: "google",
+          provider: "drive_appdata",
+          status: "synced",
+          driveManifestFileId: "manifest-file",
+          driveSlotAFileId: "slot-a-file",
+          driveSlotBFileId: "slot-b-file",
+          googleSubject: "google-subject",
+          googleEmail: "person@example.com",
+          profileId: "profile-1",
+          remoteRevision: 4,
+          lastSyncedAt: "2026-06-23T00:00:00.000Z",
+          message: "Synced before local change."
+        }
+      ]
+    });
+
+    const account: Account = {
+      ...createRecordMeta("acc-drive-preserve"),
+      name: "Live current account",
+      type: "bank",
+      role: "spendable",
+      trackingMode: "ledger",
+      currency: "MYR",
+      reconcileWeekly: true,
+      sortOrder: 1
+    };
+    await putLocalRecords("live", [{ storeName: "accounts", record: account }], "test account");
+
+    const live = await loadLiveSnapshot();
+    expect(live.syncState[0]).toMatchObject({
+      provider: "drive_appdata",
+      status: "waiting_to_sync",
+      driveManifestFileId: "manifest-file",
+      driveSlotAFileId: "slot-a-file",
+      driveSlotBFileId: "slot-b-file",
+      googleSubject: "google-subject",
+      googleEmail: "person@example.com",
+      profileId: "profile-1",
+      remoteRevision: 4
+    });
+  });
+
   it("does not clear or migrate the legacy bluehour-local database", async () => {
     await deleteDatabase(LEGACY_DB_NAME);
     const legacy = await openDB(LEGACY_DB_NAME, 1, {
