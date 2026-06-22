@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { completeLiveOnboarding, getStoreRecords, mockDriveAppDataVault, mockGoogleIdentity } from "./helpers";
+import {
+  advanceLiveOnboardingToStartCycle,
+  completeLiveOnboarding,
+  getStoreRecords,
+  mockDriveAppDataVault,
+  mockGoogleIdentity,
+  patchShellState
+} from "./helpers";
 
 test("fresh launch shows the welcome chooser", async ({ page }) => {
   await page.goto("/");
@@ -42,6 +49,20 @@ test("live setup starts empty and uses the current setup flow", async ({ page })
   await expect(page.getByText("Live setup")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Google", exact: true })).toBeVisible();
   await expect(page.getByText(/Vista Heights|Banyan Market|Orchid Stream/)).toHaveCount(0);
+});
+
+test("stale live shell without an open cycle resumes first salary setup", async ({ page }) => {
+  await advanceLiveOnboardingToStartCycle(page);
+  await patchShellState(page, {
+    activeProfile: "live",
+    applicationState: "live",
+    onboardingStep: "start_cycle"
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Start cycle", exact: true })).toBeVisible();
+  await expect(page.getByText(/No open salary cycle is available/i)).toHaveCount(0);
 });
 
 test("live changes auto-sync during an active Google session", async ({ page }) => {

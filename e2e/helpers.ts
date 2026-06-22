@@ -12,7 +12,7 @@ export async function openDemo(page: Page) {
   await expect(page.locator(".brand-state:visible, .topbar-profile-label:visible")).toBeVisible();
 }
 
-export async function completeLiveOnboarding(page: Page) {
+export async function advanceLiveOnboardingToStartCycle(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: /Set up locally first/i }).click();
   await page.getByRole("button", { name: /Defer Google for now/i }).click();
@@ -32,6 +32,10 @@ export async function completeLiveOnboarding(page: Page) {
   await expect(page.getByRole("heading", { name: "Wait salary", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Salary has arrived/i }).click();
   await expect(page.getByRole("heading", { name: "Start cycle", exact: true })).toBeVisible();
+}
+
+export async function completeLiveOnboarding(page: Page) {
+  await advanceLiveOnboardingToStartCycle(page);
 
   await page.getByLabel("Salary deposit").fill("7800.00");
   await page.getByLabel("Current balance").fill("9000.00");
@@ -76,6 +80,43 @@ export async function setGoogleSyncState(page: Page, status: string, message: st
         };
       }),
     { status, message }
+  );
+}
+
+export async function patchShellState(page: Page, patch: Record<string, unknown>) {
+  await page.evaluate(
+    async (nextPatch) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("bluehour-shell", 2);
+        request.onerror = () => reject(request.error);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("shellState")) {
+            db.createObjectStore("shellState", { keyPath: "key" });
+          }
+        };
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("shellState", "readwrite");
+          const store = tx.objectStore("shellState");
+          const getRequest = store.get("state");
+          getRequest.onerror = () => reject(getRequest.error);
+          getRequest.onsuccess = () => {
+            store.put({
+              ...(getRequest.result ?? { key: "state", legacyDatabaseDetected: false }),
+              ...nextPatch,
+              key: "state",
+              updatedAt: new Date().toISOString()
+            });
+          };
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+    patch
   );
 }
 

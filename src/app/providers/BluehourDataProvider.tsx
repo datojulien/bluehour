@@ -44,6 +44,7 @@ import {
   nextManifestForCheckpoint,
   profileManifestSettingRecord,
   readProfileManifest,
+  shellStateFromManifest,
   type ManifestOnboardingStep
 } from "../../domain/profileManifest";
 import type { PreparedRemoteRestore } from "../../data/recovery/remoteProfile";
@@ -102,17 +103,24 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const nextShell = await loadShellState();
+      let nextShell = await loadShellState();
       const nextDeviceIdentity = await loadLocalDeviceIdentity();
-      setShellState(nextShell);
       setDeviceIdentity(nextDeviceIdentity);
 
       if (!nextShell.activeProfile) {
+        setShellState(nextShell);
         setSnapshot(null);
         return;
       }
 
-      setSnapshot(await loadProfileSnapshot(nextShell.activeProfile));
+      const nextSnapshot = await loadProfileSnapshot(nextShell.activeProfile);
+      const reconciledShell = reconcileShellStateForSnapshot(nextShell, nextSnapshot);
+      if (reconciledShell) {
+        nextShell = await saveShellState(reconciledShell);
+      }
+
+      setShellState(nextShell);
+      setSnapshot(nextSnapshot);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to open Bluehour data");
     } finally {
@@ -537,7 +545,7 @@ export function useBluehourData(): BluehourDataContextValue {
   return value;
 }
 
-function deriveApplicationState(base: ApplicationState, syncState: SyncState | undefined): ApplicationState {
+export function deriveApplicationState(base: ApplicationState, syncState: SyncState | undefined): ApplicationState {
   if (syncState?.status === "read_only_recovery") {
     return "read_only_recovery";
   }
@@ -546,11 +554,48 @@ function deriveApplicationState(base: ApplicationState, syncState: SyncState | u
     return "sync_conflict";
   }
 
-  if (syncState?.status === "needs_reconnection") {
+  if (syncState?.status === "needs_reconnection" && base === "live") {
     return "needs_google_reconnection";
   }
 
   return base;
+}
+
+export function reconcileShellStateForSnapshot(
+  shell: ShellState,
+  snapshot: BluehourSnapshot
+): Partial<Omit<ShellState, "key" | "updatedAt">> | null {
+  if (shell.activeProfile !== "live" || shell.applicationState !== "live" || hasOpenSalaryCycle(snapshot)) {
+    return null;
+  }
+
+  const manifestShell = readManifestShellState(snapshot);
+  const next =
+    manifestShell && manifestShell.applicationState !== "live"
+      ? manifestShell
+      : {
+          applicationState: "ready_for_salary" as const,
+          onboardingStep: "start_cycle" as const
+        };
+
+  if (shell.applicationState === next.applicationState && shell.onboardingStep === next.onboardingStep) {
+    return null;
+  }
+
+  return next;
+}
+
+function hasOpenSalaryCycle(snapshot: Pick<BluehourSnapshot, "budgetCycles">): boolean {
+  return snapshot.budgetCycles.some((cycle) => !cycle.archivedAt && cycle.status === "open");
+}
+
+function readManifestShellState(snapshot: BluehourSnapshot): ReturnType<typeof shellStateFromManifest> | null {
+  try {
+    const manifest = readProfileManifest(snapshot.settings);
+    return manifest ? shellStateFromManifest(manifest) : null;
+  } catch {
+    return null;
+  }
 }
 
 function isManifestStep(step: OnboardingStep): step is ManifestOnboardingStep {
