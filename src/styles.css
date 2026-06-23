@@ -26,6 +26,10 @@
   --red: #b42318;
   --red-soft: #fee4df;
   --shadow: 0 20px 48px rgba(19, 45, 72, 0.12);
+  --field-readable-min: 11rem;
+  --money-readable-min: 13ch;
+  --numeric-readable-min: 8ch;
+  --date-readable-min: 11rem;
 }
 
 * {
@@ -50,6 +54,12 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+input,
+textarea,
+select {
+  min-width: 0;
 }
 
 button {
@@ -216,8 +226,11 @@ textarea:focus-visible {
 .icon-button {
   display: grid;
   place-items: center;
+  flex: 0 0 38px;
   width: 38px;
+  min-width: 38px;
   height: 38px;
+  min-height: 38px;
   border-radius: 8px;
   color: var(--slate-700);
   background: var(--white);
@@ -231,6 +244,7 @@ textarea:focus-visible {
 
 .primary-action {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   min-height: 38px;
@@ -749,6 +763,7 @@ h3 {
 
 .secondary-action {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -769,7 +784,7 @@ h3 {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--field-readable-min)), 1fr));
   gap: 14px;
 }
 
@@ -800,6 +815,38 @@ h3 {
   background: #fbfdff;
 }
 
+.form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.form-grid select,
+.form-grid textarea,
+.stack-list input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.stack-list select,
+.stack-list textarea,
+.filter-bar input,
+.filter-bar select,
+.data-row input:not([type="checkbox"]):not([type="radio"]),
+.data-row select,
+.inline-form input:not([type="checkbox"]):not([type="radio"]),
+.inline-form select {
+  min-width: min(100%, var(--field-readable-min));
+}
+
+input[inputmode="decimal"],
+.money-input {
+  min-width: min(100%, var(--money-readable-min));
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+input[inputmode="numeric"] {
+  min-width: min(100%, var(--numeric-readable-min));
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="date"] {
+  min-width: min(100%, var(--date-readable-min));
+  font-variant-numeric: tabular-nums;
+}
+
 .form-grid textarea,
 .stack-list textarea {
   resize: vertical;
@@ -822,8 +869,11 @@ h3 {
 }
 
 .checkbox-label input {
-  width: auto;
-  min-height: auto;
+  flex: 0 0 16px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
 }
 
 .checkbox-label.compact {
@@ -908,6 +958,27 @@ h3 {
   gap: 1rem;
   justify-content: space-between;
   padding: 0.85rem 1rem;
+}
+
+.continue-device-card label {
+  display: grid;
+  flex: 1 1 14rem;
+  gap: 6px;
+  min-width: min(100%, var(--field-readable-min));
+  color: var(--slate-700);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.continue-device-card input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  min-width: min(100%, var(--field-readable-min));
+  min-height: 38px;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--navy-950);
+  background: #fbfdff;
 }
 
 .checkpoint-strip small,
@@ -1190,18 +1261,46 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--slate-200);
 }
 
-.split-row,
-.inline-form {
+.split-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(92px, 140px) auto;
+  grid-template-columns: minmax(12rem, 1fr) minmax(var(--money-readable-min), 10rem) auto;
   gap: 8px;
   align-items: center;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inline-form > input:not([type="checkbox"]):not([type="radio"]),
+.inline-form > select {
+  flex: 1 1 var(--field-readable-min);
+  width: auto;
+}
+
+.inline-form > input[inputmode="decimal"],
+.inline-form > .money-input {
+  flex-basis: var(--money-readable-min);
+}
+
+.inline-form > .icon-button,
+.inline-form > .primary-action,
+.inline-form > .secondary-action,
+.split-row > .icon-button {
+  flex: 0 0 auto;
 }
 
 .data-table {
   display: grid;
   gap: 1px;
+  max-width: 100%;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 8px;
   background: var(--slate-200);
   box-shadow: inset 0 0 0 1px var(--slate-200);
@@ -1212,10 +1311,15 @@ h3 {
   grid-template-columns: minmax(100px, 0.8fr) minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(110px, 0.8fr) minmax(82px, 0.55fr);
   gap: 12px;
   align-items: center;
+  width: 100%;
   min-width: 820px;
   min-height: 54px;
   padding: 10px 12px;
   background: var(--white);
+}
+
+.data-row > * {
+  min-width: 0;
 }
 
 .subscription-table .data-row {
@@ -1232,14 +1336,22 @@ h3 {
 
 .budget-table .data-row {
   grid-template-columns:
-    minmax(140px, 1.2fr)
-    minmax(100px, 0.7fr)
-    minmax(110px, 0.8fr)
-    minmax(110px, 0.8fr)
-    minmax(110px, 0.8fr)
-    minmax(110px, 0.8fr)
-    minmax(190px, 1.2fr);
-  min-width: 980px;
+    minmax(180px, 1.3fr)
+    minmax(104px, 0.7fr)
+    repeat(4, minmax(116px, 1fr))
+    minmax(178px, auto);
+  min-width: 1040px;
+}
+
+.budget-table .inline-form {
+  display: grid;
+  grid-template-columns: minmax(var(--money-readable-min), 1fr) auto;
+  align-items: center;
+  min-width: max-content;
+}
+
+.budget-table .inline-form input[inputmode="decimal"] {
+  width: 100%;
 }
 
 .category-table .data-row {
@@ -1283,13 +1395,19 @@ h3 {
 }
 
 .subscription-details-form input,
-.subscription-details-form select {
+.subscription-details-form select,
+.price-update-form input:not([type="checkbox"]) {
   min-height: 34px;
-  max-width: 170px;
+  max-width: none;
 }
 
 .price-update-form input:not([type="checkbox"]) {
-  width: 96px;
+  flex: 0 1 calc(var(--money-readable-min) + 2ch);
+  width: auto;
+}
+
+.category-actions select {
+  min-width: min(100%, 12rem);
 }
 
 .data-row.header {
@@ -1485,6 +1603,8 @@ h3 {
 .coach-preference-row input,
 .coach-preference-row select,
 .coach-preference-grid.discretionary select {
+  width: 100%;
+  min-width: min(100%, var(--field-readable-min));
   min-height: 38px;
   border: 1px solid var(--slate-200);
   border-radius: 8px;
@@ -1602,6 +1722,8 @@ h3 {
 
 .coach-select-label select,
 .subscription-value-form select {
+  width: 100%;
+  min-width: min(100%, var(--field-readable-min));
   min-height: 38px;
   border: 1px solid var(--slate-200);
   border-radius: 8px;

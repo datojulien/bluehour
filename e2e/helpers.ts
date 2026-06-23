@@ -12,6 +12,106 @@ export async function openDemo(page: Page) {
   await expect(page.locator(".brand-state:visible, .topbar-profile-label:visible")).toBeVisible();
 }
 
+export async function expectReadableFormControls(page: Page) {
+  const controlIssues = await page.locator("input, select, textarea").evaluateAll((controls) => {
+    function isVisible(element: Element) {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return (
+        !element.hidden &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    }
+
+    return controls.flatMap((element, index) => {
+      if (!(element instanceof HTMLElement) || !isVisible(element)) {
+        return [];
+      }
+
+      const input = element instanceof HTMLInputElement ? element : null;
+      const tagName = element.tagName.toLowerCase();
+      const type = input?.type ?? tagName;
+      if (type === "hidden") {
+        return [];
+      }
+
+      const rect = element.getBoundingClientRect();
+      const inputMode = input?.inputMode || element.getAttribute("inputmode") || "";
+      const isChoiceControl = type === "checkbox" || type === "radio";
+      const isMoney = inputMode === "decimal" || element.classList.contains("money-input");
+      const inDataTable = Boolean(element.closest(".data-table"));
+      const minWidth = isChoiceControl ? 14 : isMoney || inDataTable ? 80 : 72;
+      const minHeight = isChoiceControl ? 14 : tagName === "textarea" ? 38 : 30;
+      const label = element.getAttribute("aria-label") || input?.labels?.[0]?.textContent?.trim() || input?.value || `${tagName} ${index + 1}`;
+      const issues: string[] = [];
+
+      if (rect.width < minWidth) {
+        issues.push(`${label} width ${Math.round(rect.width)}px below ${minWidth}px`);
+      }
+      if (rect.height < minHeight) {
+        issues.push(`${label} height ${Math.round(rect.height)}px below ${minHeight}px`);
+      }
+      if (inDataTable && isMoney && rect.width < 80) {
+        issues.push(`${label} table money width ${Math.round(rect.width)}px below 80px`);
+      }
+
+      return issues;
+    });
+  });
+
+  expect(controlIssues).toEqual([]);
+
+  const iconButtonIssues = await page.locator(".icon-button").evaluateAll((buttons) => {
+    return buttons.flatMap((button, index) => {
+      if (!(button instanceof HTMLElement)) {
+        return [];
+      }
+      const style = window.getComputedStyle(button);
+      const rect = button.getBoundingClientRect();
+      const visible = style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      if (!visible) {
+        return [];
+      }
+      const label = button.getAttribute("aria-label") || button.textContent?.trim() || `icon button ${index + 1}`;
+      const issues: string[] = [];
+      if (rect.width < 32) {
+        issues.push(`${label} width ${Math.round(rect.width)}px below 32px`);
+      }
+      if (rect.height < 32) {
+        issues.push(`${label} height ${Math.round(rect.height)}px below 32px`);
+      }
+      return issues;
+    });
+  });
+
+  expect(iconButtonIssues).toEqual([]);
+
+  const scrollContainerIssues = await page.locator(".data-table").evaluateAll((tables) => {
+    return tables.flatMap((table, index) => {
+      if (!(table instanceof HTMLElement)) {
+        return [];
+      }
+      const style = window.getComputedStyle(table);
+      const rect = table.getBoundingClientRect();
+      const visible = style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      if (!visible || table.scrollWidth <= table.clientWidth + 1) {
+        return [];
+      }
+      return style.overflowX === "auto" || style.overflowX === "scroll"
+        ? []
+        : [`data table ${index + 1} overflows without horizontal scrolling`];
+    });
+  });
+
+  expect(scrollContainerIssues).toEqual([]);
+}
+
 export async function advanceLiveOnboardingToStartCycle(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: /Set up locally first/i }).click();
