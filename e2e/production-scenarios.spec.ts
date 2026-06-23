@@ -393,11 +393,11 @@ test.describe("production readiness scenarios", () => {
   test("24. keyboard shortcuts and Escape close command UI", async ({ page }) => {
     await openDemo(page);
 
-    await page.keyboard.press("Meta+K");
+    await page.keyboard.press("ControlOrMeta+K");
     await expect(page.getByRole("dialog", { name: "Command menu" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Command menu" })).toHaveCount(0);
-    await page.keyboard.press("Meta+N");
+    await page.keyboard.press("ControlOrMeta+N");
     await expect(page.getByRole("heading", { name: /New transaction/i })).toBeVisible();
   });
 

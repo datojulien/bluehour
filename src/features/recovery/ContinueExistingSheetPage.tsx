@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { KeyRound, ShieldCheck, Upload } from "lucide-react";
+import { KeyRound, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import {
   DRIVE_VAULT_SCHEMA_VERSION,
+  createDriveConnectionDescriptor,
   ensureDriveVaultFiles,
   pushSnapshotToDriveVault,
-  readSnapshotFromDriveVault
+  readSnapshotFromDriveVault,
+  resetDriveVault
 } from "../../data/google/driveAppDataVault";
 import {
   fetchGoogleAccountProfile,
@@ -13,16 +15,23 @@ import {
   type GoogleAccountProfile
 } from "../../data/google/googleAuth";
 import { initializeLiveProfile, loadLiveSnapshot } from "../../data/local-db/localDb";
-import { inspectDriveVaultProfile, prepareDriveVaultRestore, type DriveProfileInspection } from "../../data/recovery/driveProfile";
+import {
+  inspectDriveVaultProfile,
+  prepareDriveVaultReadOnlyRestore,
+  prepareDriveVaultRestore,
+  type DriveProfileInspection
+} from "../../data/recovery/driveProfile";
 import type { PreparedRemoteRestore } from "../../data/recovery/remoteProfile";
 import {
   hasMeaningfulProfileData,
   nextManifestForCheckpoint,
   profileManifestSettingRecord,
-  readProfileManifest
+  readProfileManifest,
+  type BluehourProfileManifest
 } from "../../domain/profileManifest";
 import { formatDisplayDate } from "../../domain/dates";
-import type { BluehourSnapshot } from "../../domain/types";
+import { createRecordMeta, touchRecord } from "../../domain/records";
+import type { AppSettings, BluehourSnapshot, SyncState } from "../../domain/types";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -33,6 +42,7 @@ export function ContinueWithGooglePage() {
   const [localHasData, setLocalHasData] = useState(false);
   const [localProfileId, setLocalProfileId] = useState<string | null>(null);
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
+  const [vaultResetText, setVaultResetText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -130,7 +140,7 @@ export function ContinueWithGooglePage() {
     }
   }
 
-  async function restoreDriveVault() {
+  async function restoreDriveVault(repairAsLive = false) {
     setBusy(true);
     setStatus(null);
     try {
@@ -144,8 +154,18 @@ export function ContinueWithGooglePage() {
         inspection,
         now: new Date().toISOString(),
         appVersion: __BLUEHOUR_VERSION__,
-        deviceId: deviceIdentity?.deviceId
+        deviceId: deviceIdentity?.deviceId,
+        repairAsLive
       });
+      if (repairAsLive) {
+        if (!GOOGLE_CLIENT_ID) {
+          throw new Error("Set VITE_GOOGLE_CLIENT_ID before repairing the Google Drive vault");
+        }
+        const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+        const nextRemoteRevision = inspection.remoteRevision + 1;
+        await pushSnapshotToDriveVault(inspection.files, restore.snapshot, token, fetch, nextRemoteRevision, inspection.remoteRevision);
+        restore.snapshot = restoreSnapshotWithPushedRevision(restore.snapshot, restore.manifest, inspection, nextRemoteRevision);
+      }
       await restoreRemoteProfile(restore);
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/`);
     } catch (caught) {
@@ -155,9 +175,65 @@ export function ContinueWithGooglePage() {
     }
   }
 
+  async function restoreDriveVaultReadOnly() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      if (!inspection) {
+        throw new Error("Sign in before restoring a Google Drive vault");
+      }
+      if (localHasData && !replaceConfirmed) {
+        throw new Error("Confirm replacement before changing this device");
+      }
+      const restore = prepareDriveVaultReadOnlyRestore({
+        inspection,
+        now: new Date().toISOString(),
+        appVersion: __BLUEHOUR_VERSION__,
+        deviceId: deviceIdentity?.deviceId
+      });
+      await restoreRemoteProfile(restore);
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/`);
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : "Google Drive read-only restore failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetRemoteDriveVault() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      if (!inspection?.vaultExists) {
+        throw new Error("No Google Drive vault is available to reset.");
+      }
+      if (vaultResetText.trim() !== "RESET GOOGLE VAULT") {
+        throw new Error("Type RESET GOOGLE VAULT before resetting the hidden Google Drive vault.");
+      }
+      if (!GOOGLE_CLIENT_ID) {
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before resetting the Google Drive vault");
+      }
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+      await resetDriveVault(inspection.files, token, fetch, inspection.remoteRevision);
+      setInspection(null);
+      setVaultResetText("");
+      setStatus("Hidden Google Drive vault reset. Local browser data was not changed.");
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : "Google Drive vault reset failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const remoteProfileId = inspection?.manifest?.profileId ?? null;
   const differentProfile = Boolean(localHasData && localProfileId && remoteProfileId && localProfileId !== remoteProfileId);
-  const restoreDisabled = !inspection?.meaningfulRemoteData || inspection.consistencyErrors.length > 0 || busy || (localHasData && !replaceConfirmed);
+  const canRepairRemoteAsLive = Boolean(
+    inspection?.meaningfulRemoteData && inspection.profileHealth.canResumeAsLive && inspection.consistencyErrors.length === 0
+  );
+  const canRestoreReadOnly = Boolean(inspection?.meaningfulRemoteData && inspection.consistencyErrors.length > 0);
+  const restoreDisabled =
+    !inspection?.meaningfulRemoteData || (inspection.consistencyErrors.length > 0 && !canRepairRemoteAsLive) || busy || (localHasData && !replaceConfirmed);
+  const readOnlyDisabled = !canRestoreReadOnly || busy || (localHasData && !replaceConfirmed);
   const createDisabled = !inspection || inspection.meaningfulRemoteData || busy || (localHasData && !replaceConfirmed);
 
   return (
@@ -168,7 +244,7 @@ export function ContinueWithGooglePage() {
           <h1>Continue with Google</h1>
           <p>
             Sign in once and Bluehour will use a hidden Google Drive app-data vault for this profile. IndexedDB remains the fast local cache for
-            each browser.
+            each browser. A Google Sheet is not created unless you explicitly export one for inspection.
           </p>
         </div>
 
@@ -214,10 +290,29 @@ export function ContinueWithGooglePage() {
           <li className={inspection ? "active" : ""}>
             <strong>4. Open Bluehour</strong>
             {inspection?.meaningfulRemoteData ? (
-              <button className="primary-action" type="button" onClick={() => void restoreDriveVault()} disabled={restoreDisabled}>
-                <ShieldCheck size={16} aria-hidden="true" />
-                {localHasData ? "Replace local profile with Google vault" : "Set up this browser from Google vault"}
-              </button>
+              <>
+                {canRestoreReadOnly && !canRepairRemoteAsLive ? (
+                  <button className="primary-action" type="button" onClick={() => void restoreDriveVaultReadOnly()} disabled={readOnlyDisabled}>
+                    <ShieldCheck size={16} aria-hidden="true" />
+                    Restore read-only
+                  </button>
+                ) : (
+                  <button className="primary-action" type="button" onClick={() => void restoreDriveVault(canRepairRemoteAsLive)} disabled={restoreDisabled}>
+                    <ShieldCheck size={16} aria-hidden="true" />
+                    {canRepairRemoteAsLive
+                      ? "Restore and repair as live"
+                      : localHasData
+                        ? "Replace local profile with Google vault"
+                        : "Set up this browser from Google vault"}
+                  </button>
+                )}
+                {canRepairRemoteAsLive ? (
+                  <small>Bluehour will repair the manifest in the Google Drive vault after this explicit confirmation.</small>
+                ) : null}
+                {canRestoreReadOnly && !canRepairRemoteAsLive ? (
+                  <small>Bluehour will open this Drive vault in read-only recovery so exports remain available while writes stay paused.</small>
+                ) : null}
+              </>
             ) : (
               <button className="primary-action" type="button" onClick={() => void createVaultFromThisDevice()} disabled={createDisabled}>
                 <Upload size={16} aria-hidden="true" />
@@ -226,6 +321,29 @@ export function ContinueWithGooglePage() {
             )}
           </li>
         </ol>
+
+        {inspection?.vaultExists ? (
+          <div className="continue-device-card">
+            <strong>Reset hidden Google Drive vault</strong>
+            <p>
+              Bluehour stores sync data in hidden Google Drive app data, not in Google Sheets. Resetting the Drive vault removes the remote sync
+              copy for this Google account and does not delete local data on this browser.
+            </p>
+            <label>
+              Type RESET GOOGLE VAULT
+              <input value={vaultResetText} onChange={(event) => setVaultResetText(event.target.value)} disabled={busy} />
+            </label>
+            <button
+              className="secondary-action danger-action"
+              type="button"
+              onClick={() => void resetRemoteDriveVault()}
+              disabled={busy || vaultResetText.trim() !== "RESET GOOGLE VAULT"}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              Reset hidden Google Drive vault
+            </button>
+          </div>
+        ) : null}
 
         <div className="form-actions">
           <button className="secondary-action" type="button" onClick={() => void returnToWelcome()} disabled={busy}>
@@ -241,6 +359,7 @@ function DriveVaultPreview({ inspection }: { inspection: DriveProfileInspection 
   const manifest = inspection.manifest;
   const lifecycle = manifest?.lifecycle ?? "setup";
   const step = manifest?.onboardingStep;
+  const healthTitles = new Set(inspection.profileHealth.issues.map((issue) => issue.title));
   return (
     <div className="remote-preview" aria-label="Google Drive vault preview">
       <div className="data-row">
@@ -277,7 +396,7 @@ function DriveVaultPreview({ inspection }: { inspection: DriveProfileInspection 
           Accounts {inspection.counts.accounts} · Transactions {inspection.counts.transactions} · Budget cycles {inspection.counts.budgetCycles}
         </strong>
       </div>
-      {inspection.warnings.map((warning) => (
+      {inspection.warnings.filter((warning) => !healthTitles.has(warning)).map((warning) => (
         <p className="form-note danger-text" key={warning}>
           {warning}
         </p>
@@ -287,8 +406,55 @@ function DriveVaultPreview({ inspection }: { inspection: DriveProfileInspection 
           {warning}
         </p>
       ))}
+      {inspection.profileHealth.issues.map((issue) => (
+        <p className={issue.severity === "danger" ? "form-error" : "form-note"} key={issue.id}>
+          {issue.title}
+        </p>
+      ))}
     </div>
   );
+}
+
+function restoreSnapshotWithPushedRevision(
+  snapshot: BluehourSnapshot,
+  manifest: BluehourProfileManifest,
+  inspection: DriveProfileInspection,
+  remoteRevision: number
+): BluehourSnapshot {
+  const now = new Date().toISOString();
+  const descriptor = createDriveConnectionDescriptor(inspection.files, {
+    profileId: manifest.profileId,
+    googleSubject: inspection.account.sub,
+    googleEmail: inspection.account.email,
+    googleName: inspection.account.name,
+    lastKnownRemoteRevision: remoteRevision,
+    lastSuccessfulSyncAt: now
+  });
+  const existing = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
+  const descriptorSetting: AppSettings = existing
+    ? { ...touchRecord(existing), valueJson: JSON.stringify(descriptor) }
+    : { ...createRecordMeta("settings"), key: "googleConnection", valueJson: JSON.stringify(descriptor) };
+  const syncState: SyncState = {
+    ...(snapshot.syncState.find((state) => state.key === "google") ?? { key: "google" }),
+    key: "google",
+    provider: "drive_appdata",
+    status: "synced",
+    driveManifestFileId: inspection.files.manifestFileId,
+    driveSlotAFileId: inspection.files.slotAFileId,
+    driveSlotBFileId: inspection.files.slotBFileId,
+    googleSubject: inspection.account.sub,
+    googleEmail: inspection.account.email,
+    googleName: inspection.account.name,
+    profileId: manifest.profileId,
+    remoteRevision,
+    lastSyncedAt: now,
+    message: "Google Drive vault restored and repaired as live."
+  };
+  return {
+    ...snapshot,
+    settings: [...snapshot.settings.filter((setting) => setting.id !== descriptorSetting.id), descriptorSetting],
+    syncState: [syncState]
+  };
 }
 
 function checkpointSnapshotAfterGoogle(snapshot: BluehourSnapshot, deviceId?: string): BluehourSnapshot {

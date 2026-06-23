@@ -120,6 +120,119 @@ export async function patchShellState(page: Page, patch: Record<string, unknown>
   );
 }
 
+export async function seedOpenCycleMismatch(page: Page, openCycleCount = 1) {
+  await advanceLiveOnboardingToStartCycle(page);
+  await page.evaluate(
+    async (count) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("bluehour-profile-live");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction(
+            ["accounts", "balanceSnapshots", "transactions", "transactionLegs", "transactionSplits", "budgetCycles", "budgetAllocations"],
+            "readwrite"
+          );
+          const accountRequest = tx.objectStore("accounts").getAll();
+          accountRequest.onerror = () => reject(accountRequest.error);
+          accountRequest.onsuccess = () => {
+            const account = (accountRequest.result as Array<{ id: string }>)[0];
+            if (!account) {
+              reject(new Error("Expected an onboarding account before seeding profile health mismatch"));
+              return;
+            }
+            const now = new Date().toISOString();
+            for (let index = 0; index < count; index += 1) {
+              const suffix = index === 0 ? "one" : `extra-${index}`;
+              const transactionId = `txn-profile-health-${suffix}`;
+              const cycleId = `cycle-profile-health-${suffix}`;
+              tx.objectStore("transactions").put({
+                id: transactionId,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                type: "income",
+                status: "actual",
+                occurredOn: "2026-07-24",
+                description: "Main salary",
+                merchantNormalized: "main salary",
+                source: "manual"
+              });
+              tx.objectStore("transactionLegs").put({
+                id: `leg-profile-health-${suffix}`,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                transactionId,
+                accountId: account.id,
+                deltaMinor: 780_000
+              });
+              tx.objectStore("transactionSplits").put({
+                id: `split-profile-health-${suffix}`,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                transactionId,
+                categoryId: "cat-income",
+                direction: "income",
+                amountMinor: 780_000
+              });
+              tx.objectStore("balanceSnapshots").put({
+                id: `bal-profile-health-${suffix}`,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                accountId: account.id,
+                asOfDate: "2026-07-23",
+                amountMinor: 120_000,
+                source: "opening",
+                note: "Derived from current balance minus salary deposit."
+              });
+              tx.objectStore("budgetCycles").put({
+                id: cycleId,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                startedOn: "2026-07-24",
+                status: "open",
+                salaryTransactionId: transactionId,
+                expectedNextSalaryFrom: "2026-08-24",
+                expectedNextSalaryTo: "2026-08-26",
+                protectedRateBasisPoints: 1_000,
+                bufferMinimumMinor: 50_000,
+                bufferEssentialRateBasisPoints: 1_000,
+                actualMainSalaryMinor: 780_000
+              });
+              tx.objectStore("budgetAllocations").put({
+                id: `alloc-profile-health-${suffix}`,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                revision: 1,
+                budgetCycleId: cycleId,
+                categoryId: "cat-living",
+                baseAmountMinor: 120_000,
+                note: "Profile Health browser fixture."
+              });
+            }
+          };
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+    openCycleCount
+  );
+  await page.reload();
+}
+
 export async function mockGoogleIdentity(page: Page) {
   await page.addInitScript(() => {
     window.google = {
@@ -154,9 +267,12 @@ export async function mockDriveAppDataVault(
     existingRemote?: boolean;
     remoteRevision?: number;
     onboardingStep?: string;
+    lifecycle?: "setup" | "ready_for_salary" | "live";
+    openCycleCount?: number;
   } = {}
 ) {
   const filesByName = new Map<string, string>();
+  const namesById = new Map<string, string>();
   const contents = new Map<string, unknown | "">();
   const names = {
     manifest: "bluehour-manifest.json",
@@ -166,6 +282,7 @@ export async function mockDriveAppDataVault(
 
   function register(name: string, id: string, content: unknown | "" = "") {
     filesByName.set(name, id);
+    namesById.set(id, name);
     contents.set(id, content);
   }
 
@@ -211,6 +328,12 @@ export async function mockDriveAppDataVault(
             revision: 1
           }
         ],
+        balanceSnapshots: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteBalanceSnapshot(index, exportedAt)),
+        transactions: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteSalaryTransaction(index, exportedAt)),
+        transactionLegs: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteSalaryLeg(index, exportedAt)),
+        transactionSplits: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteSalarySplit(index, exportedAt)),
+        budgetCycles: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteBudgetCycle(index, exportedAt)),
+        budgetAllocations: Array.from({ length: options.openCycleCount ?? 0 }, (_, index) => remoteBudgetAllocation(index, exportedAt)),
         settings: [
           {
             id: "settings-manifest",
@@ -220,8 +343,8 @@ export async function mockDriveAppDataVault(
               profileId,
               profileName: "Personal finances",
               currency: "MYR",
-              lifecycle: "setup",
-              onboardingStep: options.onboardingStep ?? "budget",
+              lifecycle: options.lifecycle ?? "setup",
+              onboardingStep: options.lifecycle === "live" ? undefined : options.onboardingStep ?? "budget",
               createdAt: exportedAt,
               updatedAt: exportedAt,
               createdByAppVersion: "1.0.0-rc.3"
@@ -288,4 +411,110 @@ export async function mockDriveAppDataVault(
     contents.set(fileId, JSON.parse(route.request().postData() ?? "{}"));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: fileId }) });
   });
+
+  await page.route(/https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^?]+$/, async (route) => {
+    if (route.request().method() !== "DELETE") {
+      await route.fallback();
+      return;
+    }
+    const fileId = decodeURIComponent(/\/files\/([^?]+)/.exec(route.request().url())?.[1] ?? "");
+    const name = namesById.get(fileId);
+    if (name) {
+      filesByName.delete(name);
+    }
+    namesById.delete(fileId);
+    contents.delete(fileId);
+    await route.fulfill({ status: 204, body: "" });
+  });
+}
+
+function remoteSalaryTransaction(index: number, timestamp: string) {
+  return {
+    id: `remote-salary-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    type: "income",
+    status: "actual",
+    occurredOn: "2026-07-24",
+    description: "Main salary",
+    merchantNormalized: "main salary",
+    source: "manual"
+  };
+}
+
+function remoteSalaryLeg(index: number, timestamp: string) {
+  return {
+    id: `remote-salary-leg-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    transactionId: `remote-salary-${index}`,
+    accountId: "remote-daily-current",
+    deltaMinor: 780_000
+  };
+}
+
+function remoteSalarySplit(index: number, timestamp: string) {
+  return {
+    id: `remote-salary-split-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    transactionId: `remote-salary-${index}`,
+    categoryId: "cat-income",
+    direction: "income",
+    amountMinor: 780_000
+  };
+}
+
+function remoteBalanceSnapshot(index: number, timestamp: string) {
+  return {
+    id: `remote-opening-balance-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    accountId: "remote-daily-current",
+    asOfDate: "2026-07-23",
+    amountMinor: 120_000,
+    source: "opening",
+    note: "Derived from current balance minus salary deposit."
+  };
+}
+
+function remoteBudgetCycle(index: number, timestamp: string) {
+  return {
+    id: `remote-cycle-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    startedOn: "2026-07-24",
+    status: "open",
+    salaryTransactionId: `remote-salary-${index}`,
+    expectedNextSalaryFrom: "2026-08-24",
+    expectedNextSalaryTo: "2026-08-26",
+    protectedRateBasisPoints: 1_000,
+    bufferMinimumMinor: 50_000,
+    bufferEssentialRateBasisPoints: 1_000,
+    actualMainSalaryMinor: 780_000
+  };
+}
+
+function remoteBudgetAllocation(index: number, timestamp: string) {
+  return {
+    id: `remote-allocation-${index}`,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    archivedAt: null,
+    revision: 1,
+    budgetCycleId: `remote-cycle-${index}`,
+    categoryId: "cat-living",
+    baseAmountMinor: 120_000,
+    note: "Remote Profile Health fixture."
+  };
 }

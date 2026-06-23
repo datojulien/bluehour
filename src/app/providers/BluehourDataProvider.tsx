@@ -48,6 +48,12 @@ import {
   shellStateFromManifest,
   type ManifestOnboardingStep
 } from "../../domain/profileManifest";
+import {
+  inspectProfileHealth,
+  liveManifestRepairRecord,
+  onboardingManifestRepairRecord,
+  planAccidentalOpenCycleArchive
+} from "../../domain/profileHealth";
 import type { PreparedRemoteRestore } from "../../data/recovery/remoteProfile";
 import { createRecordMeta, touchRecord } from "../../domain/records";
 
@@ -80,6 +86,8 @@ interface BluehourDataContextValue {
   archiveRecord: (storeName: Parameters<typeof archiveLocalRecord>[1], recordId: string) => Promise<void>;
   restoreProfileSnapshot: (snapshot: BluehourSnapshot) => Promise<void>;
   restoreRemoteProfile: (restore: PreparedRemoteRestore) => Promise<void>;
+  resumeProfileAsLive: () => Promise<void>;
+  archiveAccidentalOpenCycleAndResumeOnboarding: () => Promise<void>;
   applyRemoteSync: (args: {
     mutations: LocalMutation[];
     conflicts: ConflictRecord[];
@@ -328,6 +336,97 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     setShellState(nextShell);
   }
 
+  async function resumeProfileAsLive() {
+    assertWritable("profile health repair");
+    if (!snapshot) {
+      throw new Error("Bluehour data has not loaded yet");
+    }
+    const manifest = safeReadProfileManifest(snapshot);
+    const health = inspectProfileHealth({
+      snapshot,
+      manifest,
+      shell: shellState
+        ? {
+            applicationState: shellState.applicationState,
+            onboardingStep: shellState.onboardingStep
+          }
+        : null
+    });
+    if (!health.canResumeAsLive) {
+      throw new Error("Profile Health cannot safely resume this profile as live.");
+    }
+
+    const record = liveManifestRepairRecord({
+      settings: snapshot.settings,
+      manifest,
+      now: new Date().toISOString(),
+      appVersion: __BLUEHOUR_VERSION__,
+      deviceId: deviceIdentity?.deviceId
+    });
+    await putLocalRecords("live", [{ storeName: "settings", record }], "profile health resume as live");
+    const nextSnapshot = await loadProfileSnapshot("live");
+    const nextShell = await saveShellState({
+      activeProfile: "live",
+      applicationState: "live",
+      onboardingStep: "start_cycle"
+    });
+    setSnapshot(nextSnapshot);
+    setShellState(nextShell);
+  }
+
+  async function archiveAccidentalOpenCycleAndResumeOnboarding() {
+    assertWritable("profile health repair");
+    if (!snapshot) {
+      throw new Error("Bluehour data has not loaded yet");
+    }
+    const now = new Date().toISOString();
+    const manifest = safeReadProfileManifest(snapshot);
+    const health = inspectProfileHealth({
+      snapshot,
+      manifest,
+      shell: shellState
+        ? {
+            applicationState: shellState.applicationState,
+            onboardingStep: shellState.onboardingStep
+          }
+        : null
+    });
+    if (!health.canArchiveAccidentalCycle) {
+      throw new Error("Profile Health cannot safely archive the open salary cycle from this profile state.");
+    }
+    const plan = planAccidentalOpenCycleArchive(snapshot, now);
+    if (!plan.safe) {
+      throw new Error(plan.reason ?? "Profile Health cannot safely identify the accidental first-cycle records.");
+    }
+    const manifestRecord = onboardingManifestRepairRecord({
+      settings: snapshot.settings,
+      manifest,
+      now,
+      appVersion: __BLUEHOUR_VERSION__,
+      deviceId: deviceIdentity?.deviceId,
+      lifecycle: "ready_for_salary",
+      onboardingStep: "start_cycle"
+    });
+    const mutations: LocalMutation[] = [
+      ...plan.records.budgetCycles.map((record) => ({ storeName: "budgetCycles" as const, record })),
+      ...plan.records.budgetAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record })),
+      ...plan.records.transactions.map((record) => ({ storeName: "transactions" as const, record })),
+      ...plan.records.transactionLegs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+      ...plan.records.transactionSplits.map((record) => ({ storeName: "transactionSplits" as const, record })),
+      ...plan.records.balanceSnapshots.map((record) => ({ storeName: "balanceSnapshots" as const, record })),
+      { storeName: "settings", record: manifestRecord }
+    ];
+    await putLocalRecords("live", mutations, "profile health archive accidental cycle");
+    const nextSnapshot = await loadProfileSnapshot("live");
+    const nextShell = await saveShellState({
+      activeProfile: "live",
+      applicationState: "ready_for_salary",
+      onboardingStep: "start_cycle"
+    });
+    setSnapshot(nextSnapshot);
+    setShellState(nextShell);
+  }
+
   async function applyRemoteSync(args: {
     mutations: LocalMutation[];
     conflicts: ConflictRecord[];
@@ -545,6 +644,8 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     archiveRecord,
     restoreProfileSnapshot: restoreProfileData,
     restoreRemoteProfile,
+    resumeProfileAsLive,
+    archiveAccidentalOpenCycleAndResumeOnboarding,
     applyRemoteSync,
     markSynced
   };
@@ -609,6 +710,14 @@ function readManifestShellState(snapshot: BluehourSnapshot): ReturnType<typeof s
   try {
     const manifest = readProfileManifest(snapshot.settings);
     return manifest ? shellStateFromManifest(manifest) : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeReadProfileManifest(snapshot: BluehourSnapshot): ReturnType<typeof readProfileManifest> {
+  try {
+    return readProfileManifest(snapshot.settings);
   } catch {
     return null;
   }

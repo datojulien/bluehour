@@ -3,12 +3,13 @@ import type { AppSettings, BluehourSnapshot, SyncState } from "../../domain/type
 import {
   createProfileManifest,
   hasMeaningfulProfileData,
+  nextManifestForCheckpoint,
   profileManifestSettingRecord,
   readProfileManifest,
   shellStateFromManifest,
-  validateManifestAgainstSnapshot,
   type BluehourProfileManifest
 } from "../../domain/profileManifest";
+import { inspectProfileHealth, liveManifestRepairRecord, type ProfileHealthResult } from "../../domain/profileHealth";
 import {
   DRIVE_VAULT_SCHEMA_VERSION,
   createDriveConnectionDescriptor,
@@ -31,6 +32,7 @@ export interface DriveProfileInspection {
   counts: RemoteProfileCounts;
   warnings: string[];
   consistencyErrors: string[];
+  profileHealth: ProfileHealthResult;
   meaningfulRemoteData: boolean;
   vaultExists: boolean;
   lastWrittenByDeviceId?: string;
@@ -53,6 +55,12 @@ export function inspectDriveVaultProfile(
       counts: emptyCounts(),
       warnings: ["No Bluehour Drive vault exists yet for this Google account."],
       consistencyErrors: [],
+      profileHealth: inspectProfileHealth({
+        snapshot,
+        manifest: null,
+        remoteSchemaVersion: DRIVE_VAULT_SCHEMA_VERSION,
+        supportedRemoteSchemaVersion: DRIVE_VAULT_SCHEMA_VERSION
+      }),
       meaningfulRemoteData: false,
       vaultExists: false
     };
@@ -78,10 +86,16 @@ export function inspectDriveVaultProfile(
     warnings.push("Remote data contains fictional demonstration identifiers. Confirm before restoring it into the live profile.");
   }
 
-  const consistencyErrors = [
-    ...((remote.schemaVersion ?? 1) > DRIVE_VAULT_SCHEMA_VERSION ? [`Google Drive vault schema ${remote.schemaVersion} is newer than this build supports.`] : []),
-    ...(manifest ? validateManifestAgainstSnapshot(manifest, snapshot) : remote.remoteRevision > 0 ? ["Remote Drive vault is missing a valid profile manifest."] : [])
-  ];
+  const profileHealth = inspectProfileHealth({
+    snapshot,
+    manifest,
+    remoteSchemaVersion: remote.schemaVersion ?? 1,
+    supportedRemoteSchemaVersion: DRIVE_VAULT_SCHEMA_VERSION
+  });
+  warnings.push(...profileHealth.issues.filter((issue) => issue.severity !== "danger").map((issue) => issue.title));
+  const consistencyErrors = profileHealth.issues
+    .filter((issue) => issue.severity === "danger" || (issue.id === "manifest_missing" && !profileHealth.canResumeAsLive && remote.remoteRevision > 0))
+    .map((issue) => issue.explanation.join(" "));
 
   return {
     files,
@@ -101,6 +115,7 @@ export function inspectDriveVaultProfile(
     },
     warnings,
     consistencyErrors,
+    profileHealth,
     meaningfulRemoteData: hasMeaningfulProfileData(snapshot),
     vaultExists: true,
     lastWrittenByDeviceId: remote.lastWrittenByDeviceId
@@ -111,26 +126,44 @@ export function prepareDriveVaultRestore({
   inspection,
   now,
   appVersion,
-  deviceId
+  deviceId,
+  repairAsLive = false
 }: {
   inspection: DriveProfileInspection;
   now: string;
   appVersion: string;
   deviceId?: string;
+  repairAsLive?: boolean;
 }): PreparedRemoteRestore {
   if (inspection.consistencyErrors.length > 0) {
     throw new Error(inspection.consistencyErrors.join(" "));
   }
 
-  const manifest =
-    inspection.manifest ??
-    createProfileManifest({
-      now,
-      appVersion,
-      deviceId,
-      lifecycle: "setup",
-      onboardingStep: "preferences"
-    });
+  if (repairAsLive && !inspection.profileHealth.canResumeAsLive) {
+    throw new Error("This Google Drive vault cannot be safely repaired as live.");
+  }
+
+  const manifest = repairAsLive
+    ? readProfileManifest([
+        liveManifestRepairRecord({
+          settings: inspection.snapshot.settings,
+          manifest: inspection.manifest,
+          now,
+          appVersion,
+          deviceId
+        })
+      ])
+    : inspection.manifest ??
+      createProfileManifest({
+        now,
+        appVersion,
+        deviceId,
+        lifecycle: "setup",
+        onboardingStep: "preferences"
+      });
+  if (!manifest) {
+    throw new Error("Profile manifest could not be prepared for restore.");
+  }
   const descriptor = driveDescriptorForInspection(inspection, manifest, now);
   const settings = upsertSetting(upsertProfileManifest(inspection.snapshot.settings, manifest), "googleConnection", JSON.stringify(descriptor));
   const syncState: SyncState = {
@@ -155,6 +188,68 @@ export function prepareDriveVaultRestore({
     outboxOperations: [],
     conflicts: [],
     syncState: [syncState]
+  };
+
+  return {
+    snapshot,
+    manifest,
+    shell: shellStateFromManifest(manifest)
+  };
+}
+
+export function prepareDriveVaultReadOnlyRestore({
+  inspection,
+  now,
+  appVersion,
+  deviceId
+}: {
+  inspection: DriveProfileInspection;
+  now: string;
+  appVersion: string;
+  deviceId?: string;
+}): PreparedRemoteRestore {
+  const manifest = inspection.manifest
+    ? nextManifestForCheckpoint({
+        current: inspection.manifest,
+        now,
+        appVersion,
+        deviceId,
+        lifecycle: "read_only_recovery"
+      })
+    : createProfileManifest({
+        now,
+        appVersion,
+        deviceId,
+        lifecycle: "read_only_recovery"
+      });
+  const descriptor = driveDescriptorForInspection(inspection, manifest, now);
+  const settings = upsertSetting(upsertProfileManifest(inspection.snapshot.settings, manifest), "googleConnection", JSON.stringify(descriptor));
+  const snapshot: BluehourSnapshot = {
+    ...inspection.snapshot,
+    settings,
+    outboxOperations: [],
+    conflicts: [],
+    syncState: [
+      {
+        key: "google",
+        provider: "drive_appdata",
+        status: "read_only_recovery",
+        driveManifestFileId: inspection.files.manifestFileId,
+        driveSlotAFileId: inspection.files.slotAFileId,
+        driveSlotBFileId: inspection.files.slotBFileId,
+        googleSubject: inspection.account.sub,
+        googleEmail: inspection.account.email,
+        googleName: inspection.account.name,
+        profileId: manifest.profileId,
+        remoteRevision: inspection.remoteRevision,
+        lastSyncedAt: now,
+        lastRemoteWriterDeviceId: inspection.lastWrittenByDeviceId,
+        message:
+          inspection.consistencyErrors.length > 0
+            ? `Google Drive vault restored read-only: ${inspection.consistencyErrors.join(" ")}`
+            : "Google Drive vault restored read-only for manual inspection."
+      }
+    ]
   };
 
   return {

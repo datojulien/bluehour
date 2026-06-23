@@ -7,7 +7,8 @@ import {
   createDriveConnectionDescriptor,
   ensureDriveVaultFiles,
   pushSnapshotToDriveVault,
-  readSnapshotFromDriveVault
+  readSnapshotFromDriveVault,
+  resetDriveVault
 } from "./driveAppDataVault";
 
 describe("Drive app-data vault", () => {
@@ -159,5 +160,129 @@ describe("Drive app-data vault", () => {
       lastKnownRemoteRevision: 3
     });
     expect(JSON.stringify(descriptor)).not.toMatch(/access_token|refresh_token|Bearer|password/i);
+  });
+
+  it("resets the hidden Drive vault by deleting manifest and slot files", async () => {
+    const deleted: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("alt=media")) {
+        return new Response(
+          JSON.stringify({
+            kind: "bluehour-drive-vault-manifest",
+            schemaVersion: 2,
+            remoteRevision: 4,
+            activeSlot: "A",
+            files: {
+              manifestFileId: "manifest-file",
+              slotAFileId: "slot-a-file",
+              slotBFileId: "slot-b-file"
+            }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (init?.method === "DELETE") {
+        deleted.push(decodeURIComponent(/\/files\/([^?]+)/.exec(url)?.[1] ?? ""));
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request ${init?.method ?? "GET"} ${url}`);
+    });
+
+    await resetDriveVault(
+      {
+        manifestFileId: "manifest-file",
+        slotAFileId: "slot-a-file",
+        slotBFileId: "slot-b-file"
+      },
+      "token",
+      fetcher as unknown as typeof fetch,
+      4
+    );
+
+    expect(deleted.sort()).toEqual(["manifest-file", "slot-a-file", "slot-b-file"]);
+  });
+
+  it("treats missing Drive vault files as already reset", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("alt=media")) {
+        return new Response("{}", { status: 404 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response("{}", { status: 404 });
+      }
+      throw new Error(`Unexpected request ${init?.method ?? "GET"} ${url}`);
+    });
+
+    await expect(
+      resetDriveVault(
+        {
+          manifestFileId: "manifest-file",
+          slotAFileId: "slot-a-file",
+          slotBFileId: "slot-b-file"
+        },
+        "token",
+        fetcher as unknown as typeof fetch,
+        0
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  it("surfaces Drive permission failures during reset", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("alt=media")) {
+        return new Response("{}", { status: 404 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(JSON.stringify({ error: { message: "insufficient permissions" } }), { status: 403 });
+      }
+      throw new Error(`Unexpected request ${init?.method ?? "GET"} ${url}`);
+    });
+
+    await expect(
+      resetDriveVault(
+        {
+          manifestFileId: "manifest-file",
+          slotAFileId: "slot-a-file",
+          slotBFileId: "slot-b-file"
+        },
+        "token",
+        fetcher as unknown as typeof fetch
+      )
+    ).rejects.toThrow(/insufficient permissions/);
+  });
+
+  it("blocks Drive vault reset when the remote revision changed", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          kind: "bluehour-drive-vault-manifest",
+          schemaVersion: 2,
+          remoteRevision: 8,
+          activeSlot: "A",
+          files: {
+            manifestFileId: "manifest-file",
+            slotAFileId: "slot-a-file",
+            slotBFileId: "slot-b-file"
+          }
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    await expect(
+      resetDriveVault(
+        {
+          manifestFileId: "manifest-file",
+          slotAFileId: "slot-a-file",
+          slotBFileId: "slot-b-file"
+        },
+        "token",
+        fetcher as unknown as typeof fetch,
+        7
+      )
+    ).rejects.toThrow(/remote_revision_changed/);
   });
 });

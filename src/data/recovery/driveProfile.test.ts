@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
-import { inspectDriveVaultProfile, prepareDriveVaultRestore } from "./driveProfile";
+import { inspectDriveVaultProfile, prepareDriveVaultReadOnlyRestore, prepareDriveVaultRestore } from "./driveProfile";
 import { snapshotForRemoteVault, type RemoteDriveVaultSnapshot } from "../google/driveAppDataVault";
 import { createProfileManifest, profileManifestSettingRecord } from "../../domain/profileManifest";
+import type { BudgetCycle } from "../../domain/types";
 
 const files = {
   manifestFileId: "manifest-file",
@@ -75,13 +76,97 @@ describe("Drive profile recovery", () => {
       snapshot: {}
     });
 
-    expect(inspection.consistencyErrors).toContain("Google Drive vault schema 999 is newer than this build supports.");
+    expect(inspection.profileHealth.status).toBe("unsupported_remote_schema");
+    expect(inspection.consistencyErrors.join(" ")).toMatch(/schema is 999/);
     expect(() =>
       prepareDriveVaultRestore({
         inspection,
         now: "2026-06-22T10:00:00.000Z",
         appVersion: "1.0.0-rc.2"
       })
-    ).toThrow(/newer than this build supports/);
+    ).toThrow(/schema is 999/);
+  });
+
+  it("allows setup manifest plus one open cycle to restore and repair as live", () => {
+    const manifest = createProfileManifest({
+      now: "2026-06-22T09:42:00.000Z",
+      appVersion: "1.0.0-rc.3",
+      lifecycle: "setup",
+      onboardingStep: "start_cycle"
+    });
+    const source = {
+      ...createDemoSnapshot(),
+      settings: [profileManifestSettingRecord([], manifest)]
+    };
+    const inspection = inspectDriveVaultProfile(files, account, {
+      manifest: {
+        kind: "bluehour-drive-vault-manifest",
+        schemaVersion: 2,
+        remoteRevision: 7,
+        activeSlot: "A",
+        files
+      },
+      activeSlot: "A",
+      schemaVersion: 2,
+      remoteRevision: 7,
+      snapshot: snapshotForRemoteVault(source)
+    });
+
+    const restore = prepareDriveVaultRestore({
+      inspection,
+      now: "2026-06-22T10:00:00.000Z",
+      appVersion: "1.0.0-rc.4",
+      repairAsLive: true
+    });
+
+    expect(inspection.consistencyErrors).toEqual([]);
+    expect(inspection.profileHealth.canResumeAsLive).toBe(true);
+    expect(restore.manifest.lifecycle).toBe("live");
+    expect(restore.shell.applicationState).toBe("live");
+  });
+
+  it("keeps multiple open cycles in read-only recovery territory", () => {
+    const manifest = createProfileManifest({
+      now: "2026-06-22T09:42:00.000Z",
+      appVersion: "1.0.0-rc.3",
+      lifecycle: "live"
+    });
+    const base = createDemoSnapshot();
+    const source = {
+      ...base,
+      budgetCycles: [base.budgetCycles[0], { ...base.budgetCycles[0], id: "cycle-open-two" } satisfies BudgetCycle],
+      settings: [profileManifestSettingRecord([], manifest)]
+    };
+
+    const inspection = inspectDriveVaultProfile(files, account, {
+      manifest: {
+        kind: "bluehour-drive-vault-manifest",
+        schemaVersion: 2,
+        remoteRevision: 7,
+        activeSlot: "A",
+        files
+      },
+      activeSlot: "A",
+      schemaVersion: 2,
+      remoteRevision: 7,
+      snapshot: snapshotForRemoteVault(source)
+    });
+
+    expect(inspection.profileHealth.status).toBe("multiple_open_cycles");
+    expect(inspection.consistencyErrors.join(" ")).toMatch(/More than one open salary cycle/);
+
+    const restore = prepareDriveVaultReadOnlyRestore({
+      inspection,
+      now: "2026-06-22T10:00:00.000Z",
+      appVersion: "1.0.0-rc.4"
+    });
+
+    expect(restore.manifest.lifecycle).toBe("read_only_recovery");
+    expect(restore.shell.applicationState).toBe("read_only_recovery");
+    expect(restore.snapshot.syncState[0]).toMatchObject({
+      provider: "drive_appdata",
+      status: "read_only_recovery",
+      remoteRevision: 7
+    });
   });
 });

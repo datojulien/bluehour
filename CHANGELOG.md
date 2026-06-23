@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0-rc.4 - 2026-06-23
+
+- Added Profile Health inspection for local and Drive-vault snapshots, including setup/open-cycle mismatches, missing manifests, shell mismatches, multiple open cycles, and unsupported remote schemas.
+- Added safe repair actions for the common setup-plus-one-open-cycle state: resume as live without changing financial records, or archive identifiable accidental first-cycle records after confirmation.
+- Hardened first salary-cycle persistence so first-cycle records, allocations, manifest lifecycle, outbox state, and shell transition are atomic from the user's perspective.
+- Added Google recovery repair for setup-plus-open-cycle Drive vaults, read-only restore for dangerous remote states, and guarded hidden Drive vault reset with stale-revision checks.
+- Added visible Profile Health panels in Settings and read-only Recovery plus browser coverage for repair, Drive reset, no-Sheet Google copy, and read-only remote recovery.
+- Kept Google Sheets as optional manual export/inspection only; Google Drive app-data vault remains the primary sync store.
+
 ## 1.0.0-rc.3 - 2026-06-23
 
 - Added Savings Coach as a primary Coach route with Spending Leak Detector, Can I Buy This?, Savings Goals, Save-the-Difference, Subscription Optimiser, and End-of-Cycle Savings Review.

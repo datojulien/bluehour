@@ -2,17 +2,17 @@
 
 This checklist is release-blocking for stable `1.0.0`. It is not claimed complete for the RC unless each item is manually performed and observed with a real Google account and the deployed app.
 
-## Automated Gate Before `1.0.0-rc.3`
+## Automated Gate Before `1.0.0-rc.4`
 
 - [x] `npm ci` passed, 262 packages installed, 0 vulnerabilities.
 - [x] `npm run lint` passed.
-- [x] `npm test` passed, 36 test files and 188 tests.
-- [x] `npm run test:coverage` passed, 75.01% statements, 64.87% branches, 80.89% functions, 74.51% lines.
+- [x] `npm test` passed, 37 test files and 213 tests.
+- [x] `npm run test:coverage` passed, 75.32% statements, 66.51% branches, 80.98% functions, 74.77% lines.
 - [x] `npm run typecheck` passed.
-- [x] `npm run build` passed, no Vite main-chunk warning; main index chunk 404.00 kB (gzip 121.02 kB).
-- [x] `npm run test:e2e` passed, 65 browser tests and 82 intentional project skips.
+- [x] `npm run build` passed, no Vite main-chunk warning; main index chunk 411.94 kB (gzip 122.98 kB).
+- [x] `npm run test:e2e` passed, 78 browser tests and 90 intentional project skips.
 
-Budget Coach, Savings Coach, Drive vault sync mocks, category management, budget progress, extra income, Daily Review, subscriptions, Recent Activity, and cycle comparison are covered by the automated gate above; stable release still depends on the manual gate below.
+Budget Coach, Savings Coach, Profile Health and Repair, Drive vault sync mocks, category management, budget progress, extra income, Daily Review, subscriptions, Recent Activity, and cycle comparison are covered by the automated gate above; stable release still depends on the manual gate below.
 
 Google Drive vault automated coverage uses mocked Google Identity and Drive responses; real Google OAuth and deployed-origin verification remain manual gates.
 
@@ -39,6 +39,10 @@ Google Drive vault automated coverage uses mocked Google Identity and Drive resp
 - [ ] Resolve the conflict explicitly.
 - [ ] Export a Google Sheet for inspection.
 - [ ] Confirm optional Sheet export does not become the sync source of truth.
+- [ ] Verify no Google Sheet appears after sign-in unless optional Sheet export is explicitly used.
+- [ ] Create a setup-plus-one-open-cycle test vault and confirm `Restore and repair as live` works.
+- [ ] Create a multiple-open-cycle test vault and confirm read-only recovery instead of auto-repair.
+- [ ] Reset the hidden Drive vault from Bluehour and confirm local financial data remains on that browser.
 - [ ] Export and restore an encrypted backup.
 - [ ] Confirm no demonstration record appears in the live Drive vault or optional Sheet export.
 - [ ] Inspect the browser storage and confirm no OAuth access token is persisted.

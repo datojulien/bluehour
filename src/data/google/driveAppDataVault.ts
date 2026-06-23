@@ -299,6 +299,28 @@ export async function pushSnapshotToDriveVault(
   return nextManifest;
 }
 
+export async function deleteDriveVaultFiles(files: DriveVaultFiles, accessToken: string, fetcher: typeof fetch = fetch): Promise<void> {
+  await Promise.all([
+    deleteAppDataFile(files.manifestFileId, accessToken, fetcher),
+    deleteAppDataFile(files.slotAFileId, accessToken, fetcher),
+    deleteAppDataFile(files.slotBFileId, accessToken, fetcher)
+  ]);
+}
+
+export async function resetDriveVault(
+  files: DriveVaultFiles,
+  accessToken: string,
+  fetcher: typeof fetch = fetch,
+  expectedRemoteRevision?: number
+): Promise<void> {
+  const currentManifest = await readDriveVaultManifest(files, accessToken, fetcher);
+  const actualRemoteRevision = currentManifest?.remoteRevision ?? 0;
+  if (expectedRemoteRevision !== undefined && actualRemoteRevision !== expectedRemoteRevision) {
+    throw new RemoteRevisionChangedError(expectedRemoteRevision, actualRemoteRevision);
+  }
+  await deleteDriveVaultFiles(files, accessToken, fetcher);
+}
+
 export function snapshotForRemoteVault(snapshot: BluehourSnapshot): Partial<BluehourSnapshot> {
   return Object.fromEntries(SYNCED_STORES.map((storeName) => [storeName, snapshot[storeName]])) as Partial<BluehourSnapshot>;
 }
@@ -393,6 +415,23 @@ async function writeJsonFile(fileId: string, value: unknown, accessToken: string
 
   if (!response.ok) {
     throw new Error(await googleDriveFailureMessage(response, "Google Drive app data write"));
+  }
+}
+
+async function deleteAppDataFile(fileId: string, accessToken: string, fetcher: typeof fetch): Promise<void> {
+  const response = await fetcher(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    throw new Error(await googleDriveFailureMessage(response, "Google Drive app data delete"));
   }
 }
 

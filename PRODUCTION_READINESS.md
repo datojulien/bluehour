@@ -4,16 +4,22 @@ Last updated: 23/06/2026
 
 ## Release Candidate Status
 
-Bluehour is prepared as `1.0.0-rc.3` when the automated verification suite below passes on the release-candidate files.
+Bluehour is prepared as `1.0.0-rc.4` when the automated verification suite below passes on the release-candidate files.
 
 This is not a stable `1.0.0` release. Real Google OAuth, real Drive app-data vault sync, optional Sheet export verification, and GitHub Pages deployment remain manual release gates for stable production use.
 
-## V1 RC3 Status
+## V1 RC4 Status
 
-RC3 extends the release-candidate track with Savings Coach while preserving the RC manual stable-release gate:
+RC4 extends the release-candidate track with Profile Health and Repair while preserving the RC manual stable-release gate:
 
 - Drive app-data vault remains the primary live-profile sync path; Google Sheets remain optional export/inspection only.
 - IndexedDB schema is v6, demo fixture version is v6, Drive vault schema is v2, and optional Sheet schema is v5.
+- Profile Health detects missing manifests, setup/open-cycle mismatches, ready-for-salary/open-cycle mismatches, live/no-cycle history, shell/manifest mismatches, multiple open cycles, and unsupported remote schema.
+- The common interrupted first-cycle state can resume as live without changing financial records, or archive identifiable accidental first-cycle records after explicit confirmation.
+- First salary-cycle start persists the opening balance snapshot, salary transaction, salary leg, salary split, budget cycle, first-cycle allocations, live manifest, outbox state, and shell transition atomically from the user's perspective.
+- Continue with Google repairs setup-plus-one-open-cycle Drive vaults after explicit confirmation, pushes the repaired manifest with stale-revision checks, and opens dangerous multiple-cycle or unsupported-schema vaults in read-only recovery.
+- Settings and recovery expose Profile Health diagnostics without showing raw JSON by default.
+- Hidden Google Drive vault reset is guarded by `RESET GOOGLE VAULT`, deletes the app-data manifest and slots, clears the local connection descriptor, discards the memory token, and preserves local financial data plus pending local changes.
 - Extra-income decisions are durable records and pending protected allocations reduce safe-to-spend until a protected transfer is explicitly linked.
 - Pending savings-goal contributions reduce safe-to-spend until the user records or links the protected transfer.
 - Savings Coach adds local-only spending leak detection, purchase checks, savings goals, Save-the-Difference, subscription value review, and cycle savings review.
@@ -23,15 +29,15 @@ RC3 extends the release-candidate track with Savings Coach while preserving the 
 
 ## Verified Automated Gate
 
-These commands were run locally from a clean dependency install during the RC3 pass:
+These commands were run locally from a clean dependency install during the RC4 pass:
 
 - `npm ci`: passed, 262 packages installed, 0 vulnerabilities.
 - `npm run lint`: passed.
-- `npm test`: passed, 36 test files and 188 tests.
-- `npm run test:coverage`: passed, 75.01% statements, 64.87% branches, 80.89% functions, 74.51% lines.
+- `npm test`: passed, 37 test files and 213 tests.
+- `npm run test:coverage`: passed, 75.32% statements, 66.51% branches, 80.98% functions, 74.77% lines.
 - `npm run typecheck`: passed.
-- `npm run build`: passed, no Vite main-chunk warning; the main index chunk was 404.00 kB (gzip 121.02 kB).
-- `npm run test:e2e`: passed, 65 browser tests and 82 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
+- `npm run build`: passed, no Vite main-chunk warning; the main index chunk was 411.94 kB (gzip 122.98 kB).
+- `npm run test:e2e`: passed, 78 browser tests and 90 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
 
 ## Completed Across The RC Track
 
@@ -67,6 +73,9 @@ These commands were run locally from a clean dependency install during the RC3 p
 - [x] Refactored the sync planner around provider-neutral remote snapshots while keeping Google Sheets as optional export/inspection.
 - [x] Added mocked Drive vault tests for staged writes, unsupported-schema recovery, profile restore, and browser login flows.
 - [x] Added exact budget-progress domain calculations shared by Overview and Budgets.
+- [x] Added Profile Health inspection and repair for manifest/snapshot/shell mismatches.
+- [x] Added first-cycle transaction-boundary tests proving no partial salary-cycle records remain after a failed local persistence step.
+- [x] Added guarded hidden Drive vault reset with stale-revision, missing-file, permission-failure, descriptor-clearing, and local-data-preservation coverage.
 - [x] Added Savings Coach domain engines, persisted goal/contribution/insight/purchase records, and explicit user-action flows.
 - [x] Added category taxonomy reconciliation and category manager workflows.
 - [x] Added extra-income allocation, Daily Review, Recent Activity, cycle comparison, and subscription hardening.
@@ -90,6 +99,7 @@ The required manual checklist is in `docs/RC_CHECKLIST.md` and includes:
 - Create a live profile with no fictional data.
 - Create and verify a hidden Bluehour Drive app-data vault.
 - Confirm inactive-slot writes, `bluehour-manifest.json` last, reload/pull, offline outbox, reconnection, conflicts, optional Sheet export, encrypted backup restore, and no persisted OAuth token.
+- Confirm Profile Health repair, read-only recovery for multiple open cycles, and hidden Drive vault reset with a real Google account.
 
 ## Stable `1.0.0` Rule
 

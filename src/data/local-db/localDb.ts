@@ -572,37 +572,53 @@ export async function putLocalRecords(profileId: ProfileId, mutations: readonly 
   const tx = db.transaction([...MUTABLE_STORES], "readwrite");
   const now = new Date().toISOString();
   const shouldQueueOutbox = profileId === "live";
-  const previousSyncState = await tx.objectStore("syncState").get("google");
 
-  for (const mutation of mutations) {
-    await tx.objectStore(mutation.storeName).put(mutation.record as never);
-    if (shouldQueueOutbox && (mutation.outbox ?? mutation.storeName !== "outboxOperations")) {
-      const record = mutation.record as { id?: string; key?: string };
-      const recordId = record.id ?? record.key ?? crypto.randomUUID();
-      const operation: OutboxOperation = {
-        id: `outbox-${crypto.randomUUID()}`,
-        tableName: mutation.storeName,
-        recordId,
-        operation: "put",
-        payloadJson: JSON.stringify(mutation.record),
-        createdAt: now,
-        attempts: 0
-      };
-      await tx.objectStore("outboxOperations").put(operation);
+  try {
+    const previousSyncState = await tx.objectStore("syncState").get("google");
+
+    for (const mutation of mutations) {
+      await tx.objectStore(mutation.storeName).put(mutation.record as never);
+      if (shouldQueueOutbox && (mutation.outbox ?? mutation.storeName !== "outboxOperations")) {
+        const record = mutation.record as { id?: string; key?: string };
+        const recordId = record.id ?? record.key ?? crypto.randomUUID();
+        const operation: OutboxOperation = {
+          id: `outbox-${crypto.randomUUID()}`,
+          tableName: mutation.storeName,
+          recordId,
+          operation: "put",
+          payloadJson: JSON.stringify(mutation.record),
+          createdAt: now,
+          attempts: 0
+        };
+        await tx.objectStore("outboxOperations").put(operation);
+      }
     }
-  }
 
-  await tx.objectStore("syncState").put({
-    ...previousSyncState,
-    key: "google",
-    status: profileId === "demo" ? "demo" : "waiting_to_sync",
-    message:
-      profileId === "demo"
-        ? `${outboxLabel} saved in the fictional demonstration profile. Google sync is disabled.`
-        : `${outboxLabel} saved locally and waiting to sync.`
-  });
-  await tx.done;
-  db.close();
+    await tx.objectStore("syncState").put({
+      ...previousSyncState,
+      key: "google",
+      status: profileId === "demo" ? "demo" : "waiting_to_sync",
+      message:
+        profileId === "demo"
+          ? `${outboxLabel} saved in the fictional demonstration profile. Google sync is disabled.`
+          : `${outboxLabel} saved locally and waiting to sync.`
+    });
+    await tx.done;
+  } catch (caught) {
+    try {
+      tx.abort();
+    } catch {
+      // Transaction may already be aborted or complete.
+    }
+    try {
+      await tx.done;
+    } catch {
+      // The abort is intentional; the original mutation error is rethrown below.
+    }
+    throw caught;
+  } finally {
+    db.close();
+  }
 }
 
 export async function archiveLocalRecord(profileId: ProfileId, storeName: DomainStoreName, recordId: string): Promise<void> {

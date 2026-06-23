@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { openDemo } from "./helpers";
+import { openDemo, seedOpenCycleMismatch } from "./helpers";
 
 test.describe("accessibility automation", () => {
   test.beforeEach(({ page }, testInfo) => {
@@ -22,7 +22,7 @@ test.describe("accessibility automation", () => {
 
   test("command dialog has keyboard focus and passes automated axe checks", async ({ page }) => {
     await openDemo(page);
-    await page.keyboard.press("Meta+K");
+    await page.keyboard.press("ControlOrMeta+K");
 
     await expect(page.getByRole("dialog", { name: "Command menu" })).toBeVisible();
     await expect(page.getByRole("button", { name: /New transaction/i })).toBeFocused();
@@ -32,5 +32,13 @@ test.describe("accessibility automation", () => {
 
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "Command menu" })).toHaveCount(0);
+  });
+
+  test("Profile Health repair panel passes automated axe checks", async ({ page }) => {
+    await seedOpenCycleMismatch(page);
+    await expect(page.getByRole("heading", { name: "A salary cycle already exists" })).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).include(".repair-panel").analyze();
+    expect(results.violations).toEqual([]);
   });
 });

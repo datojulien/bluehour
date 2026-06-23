@@ -4,6 +4,8 @@ Google Drive `appDataFolder` is the primary cross-browser remote store for the l
 
 Google Sheets are optional export/inspection only. They are not used for login, onboarding, or daily sync.
 
+No Sheet appears after Google sign-in. That is expected: the sync vault is hidden Drive app data, not a spreadsheet. A Sheet is created only when the user explicitly chooses the optional Sheet export action in Settings.
+
 ## OAuth
 
 - Client ID comes from `VITE_GOOGLE_CLIENT_ID`.
@@ -67,8 +69,10 @@ On first sign-in from a new browser:
 
 1. Bluehour ensures the three app-data files exist.
 2. If the vault contains a profile, Bluehour validates it and atomically rebuilds `bluehour-profile-live` after confirmation when needed.
-3. If no vault exists and the browser has no meaningful live profile, Bluehour creates the live profile locally and writes the first staged snapshot to Drive.
-4. If local and remote profile IDs differ, automatic merge is blocked.
+3. If the vault contains the repairable setup-plus-one-open-cycle mismatch, Bluehour offers `Restore and repair as live` and pushes the repaired manifest only after explicit confirmation and stale-revision checking.
+4. If the vault contains multiple open cycles or a newer unsupported schema, Bluehour offers read-only recovery rather than auto-repairing.
+5. If no vault exists and the browser has no meaningful live profile, Bluehour creates the live profile locally and writes the first staged snapshot to Drive.
+6. If local and remote profile IDs differ, automatic merge is blocked.
 
 ## Cross-Device Rules
 
@@ -88,6 +92,16 @@ Bluehour does not store refresh tokens. The current browser tab may reuse an acc
 ## Optional Sheet Export
 
 Settings can create or update a Google Sheet for manual inspection. Sheet schema v5 uses `Meta`, active/inactive tabs, runtime validation, read-back comparison, `ExtraIncomeAllocations`, `SavingsGoals`, `SavingsGoalContributions`, `CoachInsightDecisions`, and `PurchaseChecks` tabs. Legacy v1, v2, v3, and v4 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
+
+## Vault Reset
+
+Settings and Google recovery include a guarded `Reset hidden Google Drive vault` action. The user must type `RESET GOOGLE VAULT`. Bluehour then checks the current remote revision and deletes:
+
+- `bluehour-manifest.json`
+- `bluehour-slot-A.json`
+- `bluehour-slot-B.json`
+
+Missing files are tolerated. Permission failures are reported. Local financial records and pending local outbox changes are preserved, the local Google connection descriptor is cleared, and the in-memory Google token is discarded. Reconnecting Google creates a new vault from the current local live profile.
 
 ## Testing
 

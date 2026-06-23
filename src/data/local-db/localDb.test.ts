@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openDB } from "idb";
 import { createRecordMeta } from "../../domain/records";
-import type { Account, Category } from "../../domain/types";
+import type { Account, BudgetAllocation, Category } from "../../domain/types";
 import {
   LEGACY_DB_NAME,
   PROFILE_DB_NAMES,
@@ -15,7 +15,8 @@ import {
   seedDemoIfNeeded
 } from "./localDb";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
-import { readProfileManifest } from "../../domain/profileManifest";
+import { nextManifestForCheckpoint, profileManifestSettingRecord, readProfileManifest } from "../../domain/profileManifest";
+import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
 
 describe("local IndexedDB repository", () => {
   async function deleteDatabase(name: string): Promise<void> {
@@ -49,6 +50,119 @@ describe("local IndexedDB repository", () => {
     expect(snapshot.settings.some((setting) => setting.key === "preferences")).toBe(true);
     expect(readProfileManifest(snapshot.settings)?.lifecycle).toBe("setup");
     expect(snapshot.syncState[0]?.status).toBe("saved_locally");
+  });
+
+  it("writes first-cycle records and the live manifest in one local transaction", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    await loadLiveSnapshot();
+    const account = liveAccount("acc-first-cycle", "First-cycle current account");
+    await putLocalRecords("live", [{ storeName: "accounts", record: account }], "onboarding account");
+    const snapshot = await loadLiveSnapshot();
+    const firstCycle = startFirstSalaryCycle({
+      salaryDate: "2026-07-24",
+      salaryDepositText: "RM7,800.00",
+      currentBalanceText: "RM9,200.00",
+      destinationAccountId: account.id,
+      incomeCategoryId: "cat-income",
+      existingCycles: snapshot.budgetCycles
+    });
+    const allocation: BudgetAllocation = {
+      ...createRecordMeta("alloc-first-cycle"),
+      budgetCycleId: firstCycle.cycle.id,
+      categoryId: "cat-living",
+      baseAmountMinor: 120_000,
+      note: "First-cycle budget allocation."
+    };
+    const currentManifest = readProfileManifest(snapshot.settings);
+    if (!currentManifest) {
+      throw new Error("Expected live setup manifest");
+    }
+    const liveManifestRecord = profileManifestSettingRecord(
+      snapshot.settings,
+      nextManifestForCheckpoint({
+        current: currentManifest,
+        now: "2026-06-23T00:00:00.000Z",
+        appVersion: "1.0.0-rc.4",
+        lifecycle: "live"
+      })
+    );
+
+    await putLocalRecords(
+      "live",
+      [
+        { storeName: "balanceSnapshots", record: firstCycle.openingSnapshot },
+        { storeName: "transactions", record: firstCycle.salaryTransaction },
+        { storeName: "transactionLegs", record: firstCycle.salaryLeg },
+        { storeName: "transactionSplits", record: firstCycle.salarySplit },
+        { storeName: "budgetCycles", record: firstCycle.cycle },
+        { storeName: "budgetAllocations", record: allocation },
+        { storeName: "settings", record: liveManifestRecord }
+      ],
+      "first salary cycle"
+    );
+
+    const live = await loadLiveSnapshot();
+    expect(live.budgetCycles.filter((cycle) => !cycle.archivedAt && cycle.status === "open")).toHaveLength(1);
+    expect(live.transactions).toHaveLength(1);
+    expect(live.transactionLegs).toHaveLength(1);
+    expect(live.transactionSplits).toHaveLength(1);
+    expect(live.budgetAllocations).toHaveLength(1);
+    const repairedManifest = readProfileManifest(live.settings);
+    expect(repairedManifest?.lifecycle).toBe("live");
+    expect(repairedManifest).not.toHaveProperty("onboardingStep");
+    expect(live.syncState[0]?.status).toBe("waiting_to_sync");
+  });
+
+  it("leaves no partial first-cycle records when the local transaction fails", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    await loadLiveSnapshot();
+    const account = liveAccount("acc-first-cycle-fail", "First-cycle failure account");
+    await putLocalRecords("live", [{ storeName: "accounts", record: account }], "onboarding account");
+    const snapshot = await loadLiveSnapshot();
+    const firstCycle = startFirstSalaryCycle({
+      salaryDate: "2026-07-24",
+      salaryDepositText: "RM7,800.00",
+      currentBalanceText: "RM9,200.00",
+      destinationAccountId: account.id,
+      incomeCategoryId: "cat-income",
+      existingCycles: snapshot.budgetCycles
+    });
+    const currentManifest = readProfileManifest(snapshot.settings);
+    if (!currentManifest) {
+      throw new Error("Expected live setup manifest");
+    }
+    const liveManifestRecord = profileManifestSettingRecord(
+      snapshot.settings,
+      nextManifestForCheckpoint({
+        current: currentManifest,
+        now: "2026-06-23T00:00:00.000Z",
+        appVersion: "1.0.0-rc.4",
+        lifecycle: "live"
+      })
+    );
+
+    await expect(
+      putLocalRecords(
+        "live",
+        [
+          { storeName: "balanceSnapshots", record: firstCycle.openingSnapshot },
+          { storeName: "transactions", record: firstCycle.salaryTransaction },
+          { storeName: "transactionLegs", record: firstCycle.salaryLeg },
+          { storeName: "transactionSplits", record: firstCycle.salarySplit },
+          { storeName: "budgetCycles", record: { ...firstCycle.cycle, id: undefined as unknown as string } },
+          { storeName: "settings", record: liveManifestRecord }
+        ],
+        "first salary cycle"
+      )
+    ).rejects.toThrow();
+
+    const live = await loadLiveSnapshot();
+    expect(live.balanceSnapshots).toEqual([]);
+    expect(live.transactions).toEqual([]);
+    expect(live.transactionLegs).toEqual([]);
+    expect(live.transactionSplits).toEqual([]);
+    expect(live.budgetCycles).toEqual([]);
+    expect(readProfileManifest(live.settings)?.lifecycle).toBe("setup");
   });
 
   it("keeps demo reset isolated from live data", async () => {
@@ -326,3 +440,17 @@ describe("local IndexedDB repository", () => {
     expect(snapshot.extraIncomeAllocations).toEqual([]);
   });
 });
+
+function liveAccount(id: string, name: string): Account {
+  return {
+    ...createRecordMeta(id),
+    id,
+    name,
+    type: "bank",
+    role: "spendable",
+    trackingMode: "ledger",
+    currency: "MYR",
+    reconcileWeekly: true,
+    sortOrder: 1
+  };
+}

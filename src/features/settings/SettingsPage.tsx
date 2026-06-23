@@ -11,6 +11,7 @@ import {
   parseDriveConnectionDescriptor,
   pushSnapshotToDriveVault,
   readSnapshotFromDriveVault,
+  resetDriveVault,
   RemoteRevisionChangedError,
   type DriveConnectionDescriptor,
   type DriveVaultFiles
@@ -44,12 +45,14 @@ import {
 import type { Account, AppSettings, BalanceSnapshot, BluehourSnapshot, Category, CoachInsightDecision, ConflictRecord, PlanInstance, RecurringRule, SyncState } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { readProfileManifest } from "../../domain/profileManifest";
+import { inspectProfileHealth, type ProfileHealthResult } from "../../domain/profileHealth";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
 export function SettingsPage() {
   const {
     snapshot,
+    shellState,
     asOfDate,
     deviceIdentity,
     loading,
@@ -58,6 +61,8 @@ export function SettingsPage() {
     restoreProfileSnapshot,
     applyRemoteSync,
     deleteLiveDataAndRestart,
+    resumeProfileAsLive,
+    archiveAccidentalOpenCycleAndResumeOnboarding,
     isDemo,
     canUseGoogleSync
   } = useBluehourData();
@@ -89,6 +94,18 @@ export function SettingsPage() {
       {message ? <section className="alert-band">{message}</section> : null}
 
       <section className="two-column">
+        <ProfileHealthPanel
+          snapshot={snapshot}
+          shellState={shellState}
+          onResumeLive={async () => {
+            await resumeProfileAsLive();
+            setMessage("Profile Health repaired the manifest and resumed the live profile.");
+          }}
+          onArchiveCycle={async () => {
+            await archiveAccidentalOpenCycleAndResumeOnboarding();
+            setMessage("Profile Health archived the accidental first-cycle records and returned to setup.");
+          }}
+        />
         <AccountForm
           date={asOfDate}
           onSave={async ({ account, balanceSnapshot }) => {
@@ -107,7 +124,8 @@ export function SettingsPage() {
           deviceId={deviceIdentity?.deviceId}
           canUseGoogleSync={canUseGoogleSync}
           onApplyRemoteSync={applyRemoteSync}
-          onPushed={() => setMessage("Snapshot exported to Google Sheet with RAW values.")}
+          onPushed={() => setMessage("Optional Google Sheet export saved with RAW values.")}
+          onVaultReset={() => setMessage("Hidden Google Drive vault reset. Local financial data was preserved.")}
         />
       </section>
 
@@ -914,12 +932,133 @@ function ReservationModeSelect({ value, onChange, disabled = false }: { value: C
   );
 }
 
+function ProfileHealthPanel({
+  snapshot,
+  shellState,
+  onResumeLive,
+  onArchiveCycle
+}: {
+  snapshot: BluehourSnapshot;
+  shellState: ReturnType<typeof useBluehourData>["shellState"];
+  onResumeLive: () => Promise<void>;
+  onArchiveCycle: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const manifest = safeReadManifest(snapshot.settings);
+  const health = inspectProfileHealth({
+    snapshot,
+    manifest,
+    shell: shellState
+      ? {
+          applicationState: shellState.applicationState,
+          onboardingStep: shellState.onboardingStep
+        }
+      : null
+  });
+  const syncState = snapshot.syncState.find((state) => state.key === "google");
+
+  async function run(label: string, action: () => Promise<void>) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+      setMessage(label);
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Profile Health action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="dashboard-band" id="profile-health">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Profile Health</p>
+          <h2>Local profile {health.status === "healthy" ? "healthy" : "needs repair"}</h2>
+        </div>
+      </div>
+      <div className="sync-summary-grid">
+        <HealthMetric label="Manifest lifecycle" value={health.manifestLifecycle} />
+        <HealthMetric label="Onboarding step" value={health.onboardingStep ?? "none"} />
+        <HealthMetric label="Open salary cycles" value={String(health.openCycleCount)} />
+        <HealthMetric label="Closed salary cycles" value={String(health.closedCycleCount)} />
+        <HealthMetric label="Remote vault" value={syncState?.provider === "drive_appdata" ? syncState.status : "not connected"} />
+        <HealthMetric label="Remote revision" value={String(syncState?.remoteRevision ?? 0)} />
+        <HealthMetric label="Pending local changes" value={String(snapshot.outboxOperations.length)} />
+        <HealthMetric label="Shell state" value={shellState?.applicationState ?? "none"} />
+      </div>
+      <div className="stack-list">
+        {health.issues.length === 0 ? <p>No local profile-health issues were detected.</p> : null}
+        {health.issues.map((issue) => (
+          <div className={`health-issue health-issue-${issue.severity}`} key={issue.id}>
+            <strong>{issue.title}</strong>
+            {issue.explanation.map((line) => (
+              <small key={line}>{line}</small>
+            ))}
+          </div>
+        ))}
+        <div className="form-actions">
+          <button className="primary-action" type="button" onClick={() => void run("Profile resumed as live.", onResumeLive)} disabled={busy || !health.canResumeAsLive}>
+            Resume as live profile
+          </button>
+        </div>
+        <div className="continue-device-card">
+          <strong>Archive accidental cycle</strong>
+          <p>Available only when Bluehour can identify the first-cycle records safely. Records are archived, not permanently deleted.</p>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={confirmArchive} onChange={(event) => setConfirmArchive(event.target.checked)} disabled={busy || !health.canArchiveAccidentalCycle} />
+            I understand this archives the accidental first-cycle records.
+          </label>
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={() => void run("Accidental salary cycle archived.", onArchiveCycle)}
+            disabled={busy || !health.canArchiveAccidentalCycle || !confirmArchive}
+          >
+            Archive accidental cycle
+          </button>
+        </div>
+        <details>
+          <summary>Advanced diagnostics</summary>
+          <pre>{JSON.stringify(profileHealthDiagnostic(health, snapshot), null, 2)}</pre>
+        </details>
+        {message ? <p className="form-note">{message}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function HealthMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function profileHealthDiagnostic(health: ProfileHealthResult, snapshot: BluehourSnapshot) {
+  return {
+    status: health.status,
+    issues: health.issues.map((issue) => issue.id),
+    manifestLifecycle: health.manifestLifecycle,
+    onboardingStep: health.onboardingStep,
+    openCycleCount: health.openCycleCount,
+    closedCycleCount: health.closedCycleCount,
+    pendingLocalChanges: snapshot.outboxOperations.length
+  };
+}
+
 function GoogleSettings({
   snapshot,
   deviceId,
   canUseGoogleSync,
   onApplyRemoteSync,
-  onPushed
+  onPushed,
+  onVaultReset
 }: {
   snapshot: BluehourSnapshot;
   deviceId?: string;
@@ -931,12 +1070,14 @@ function GoogleSettings({
     clearOutbox: boolean;
   }) => Promise<void>;
   onPushed: () => void;
+  onVaultReset: () => void;
 }) {
   const existing = snapshot.settings.find((setting) => setting.key === "googleConnection" && !setting.archivedAt);
   const manifest = readProfileManifest(snapshot.settings);
   const existingDriveValue = existing ? driveConnectionDescriptorFromSetting(existing) : null;
   const syncState = snapshot.syncState.find((state) => state.key === "google");
   const [spreadsheetInput, setSpreadsheetInput] = useState("");
+  const [vaultResetText, setVaultResetText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pendingLocalChanges = snapshot.outboxOperations.length;
@@ -1193,6 +1334,50 @@ function GoogleSettings({
     setStatus("This browser was disconnected. Local data and the remote Drive vault were preserved.");
   }
 
+  async function resetHiddenDriveVault() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      if (!canUseGoogleSync) {
+        throw new Error("Demonstration data cannot reset a Google Drive vault");
+      }
+      if (vaultResetText.trim() !== "RESET GOOGLE VAULT") {
+        throw new Error("Type RESET GOOGLE VAULT before resetting the hidden Google Drive vault.");
+      }
+      if (!GOOGLE_CLIENT_ID) {
+        throw new Error("Set VITE_GOOGLE_CLIENT_ID before resetting the Google Drive vault");
+      }
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID);
+      const files = savedDriveFiles ?? (await ensureDriveVaultFiles(token));
+      const expectedRemoteRevision = syncState?.remoteRevision ?? existingDriveValue?.lastKnownRemoteRevision;
+      await resetDriveVault(files, token, fetch, expectedRemoteRevision);
+      const archivedConnection = existing
+        ? {
+            ...touchRecord(existing),
+            archivedAt: new Date().toISOString()
+          }
+        : null;
+      await onApplyRemoteSync({
+        mutations: archivedConnection ? [{ storeName: "settings", record: archivedConnection, outbox: false }] : [],
+        conflicts: [],
+        syncState: {
+          key: "google",
+          status: "saved_locally",
+          message: "Hidden Google Drive vault reset. Local financial data and pending local changes were preserved."
+        },
+        clearOutbox: false
+      });
+      clearInMemoryGoogleAccessToken();
+      setVaultResetText("");
+      setStatus("Hidden Google Drive vault reset. Reconnect Google to create a new vault from this local profile.");
+      onVaultReset();
+    } catch (caught) {
+      setStatus(syncFailureMessage(caught, "Google Drive vault reset failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="dashboard-band">
       <div className="band-header">
@@ -1284,6 +1469,27 @@ function GoogleSettings({
           <button className="secondary-action" type="button" onClick={() => void exportToSheet()} disabled={busy || !canUseGoogleSync}>
             <Upload size={16} aria-hidden="true" />
             {spreadsheetInput ? "Export to Sheet" : "Create Sheet export"}
+          </button>
+        </div>
+        <div className="continue-device-card">
+          <strong>Reset hidden Google Drive vault</strong>
+          <p>
+            Bluehour stores sync data in hidden Google Drive app data, not in Google Sheets. Resetting the Drive vault removes the remote sync copy
+            for this Google account. It does not delete local data on this browser unless you also reset local data.
+          </p>
+          <p className="form-note danger-text">Export an encrypted backup first. Optional Sheet export is only for inspection and is not the sync source.</p>
+          <label>
+            Type RESET GOOGLE VAULT
+            <input value={vaultResetText} onChange={(event) => setVaultResetText(event.target.value)} disabled={busy || !canUseGoogleSync} />
+          </label>
+          <button
+            className="secondary-action danger-action"
+            type="button"
+            onClick={() => void resetHiddenDriveVault()}
+            disabled={busy || !canUseGoogleSync || vaultResetText.trim() !== "RESET GOOGLE VAULT"}
+          >
+            <Trash2 size={16} aria-hidden="true" />
+            Reset hidden Google Drive vault
           </button>
         </div>
         {status ? <p className="form-note">{status}</p> : null}
@@ -1486,8 +1692,8 @@ function DangerZonePanel({ isDemo, onDeleteLiveData }: { isDemo: boolean; onDele
       </div>
       <div className="stack-list">
         <p>
-          This clears the live profile stored in this browser and restarts Bluehour at a blank live setup. It does not delete the hidden Google Drive
-          vault or data stored in another browser.
+          This clears only this browser's local live profile and restarts Bluehour at a blank live setup. If Google Drive vault sync is still
+          connected, reconnecting may restore the remote profile. To start completely fresh, reset the hidden Google Drive vault too.
         </p>
         {isDemo ? <p className="form-note danger-text">Switch to the live profile before deleting local live data. Demo reset is available in the top bar.</p> : null}
         <label>
@@ -1529,6 +1735,14 @@ function prettyJson(json: string): string {
 function driveConnectionDescriptorFromSetting(setting: AppSettings): DriveConnectionDescriptor | null {
   try {
     return parseDriveConnectionDescriptor(JSON.parse(setting.valueJson));
+  } catch {
+    return null;
+  }
+}
+
+function safeReadManifest(settings: readonly AppSettings[]) {
+  try {
+    return readProfileManifest(settings);
   } catch {
     return null;
   }

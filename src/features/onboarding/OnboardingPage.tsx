@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, KeyRound, Landmark, Plus } from "lucide-react";
+import { CheckCircle2, Circle, KeyRound, Landmark, Plus, ShieldAlert } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import {
@@ -18,6 +18,7 @@ import { createRecordMeta, touchRecord } from "../../domain/records";
 import type { Account, AppSettings, BalanceSnapshot, BudgetAllocation, Category, PlanInstance } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { readProfileManifest } from "../../domain/profileManifest";
+import { inspectProfileHealth } from "../../domain/profileHealth";
 import { BudgetCoachPanel } from "../budgets/BudgetCoachPanel";
 import {
   appendBudgetCoachDecision,
@@ -41,8 +42,22 @@ const steps = [
 ] as const;
 
 export function OnboardingPage() {
-  const { snapshot, shellState, asOfDate, clock, loading, error, setOnboardingStep, saveRecords, saveRecordsAndAdvanceOnboarding, markSynced, returnToWelcome } =
-    useBluehourData();
+  const {
+    snapshot,
+    shellState,
+    asOfDate,
+    clock,
+    loading,
+    error,
+    setOnboardingStep,
+    saveRecords,
+    saveRecordsAndAdvanceOnboarding,
+    markSynced,
+    returnToWelcome,
+    deleteLiveDataAndRestart,
+    resumeProfileAsLive,
+    archiveAccidentalOpenCycleAndResumeOnboarding
+  } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
   const currentStep = shellState?.onboardingStep === "welcome" ? "google" : shellState?.onboardingStep ?? "google";
   const currentIndex = steps.findIndex((step) => step.id === currentStep);
@@ -52,6 +67,21 @@ export function OnboardingPage() {
     const stored = readBudgetCoachPreferences(snapshot?.settings ?? [], categories);
     return snapshot ? recommendedProfileForOnboarding(snapshot, asOfDate, stored) : stored;
   }, [asOfDate, categories, snapshot]);
+  const profileHealth = useMemo(() => {
+    if (!snapshot) {
+      return null;
+    }
+    return inspectProfileHealth({
+      snapshot,
+      manifest: safeReadManifest(snapshot.settings),
+      shell: shellState
+        ? {
+            applicationState: shellState.applicationState,
+            onboardingStep: shellState.onboardingStep
+          }
+        : null
+    });
+  }, [shellState, snapshot]);
 
   if (loading) {
     return <div className="loading-state full-page-state">Opening live setup...</div>;
@@ -328,7 +358,21 @@ export function OnboardingPage() {
           </SetupPanel>
         ) : null}
 
-        {currentStep === "start_cycle" ? (
+        {currentStep === "start_cycle" && profileHealth?.canResumeAsLive ? (
+          <OnboardingRepairPanel
+            canArchive={profileHealth.canArchiveAccidentalCycle}
+            onResumeLive={async () => {
+              await resumeProfileAsLive();
+            }}
+            onArchiveCycle={async () => {
+              await archiveAccidentalOpenCycleAndResumeOnboarding();
+              setMessage("Accidental salary-cycle records were archived and setup can continue.");
+            }}
+            onResetLocal={async () => {
+              await deleteLiveDataAndRestart();
+            }}
+          />
+        ) : currentStep === "start_cycle" ? (
           <FirstCycleForm
             date={asOfDate}
             accounts={accounts}
@@ -412,6 +456,88 @@ function GoogleOnboardingPanel({
           </button>
         </div>
         {status ? <p className="form-note danger-text">{status}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function OnboardingRepairPanel({
+  canArchive,
+  onResumeLive,
+  onArchiveCycle,
+  onResetLocal
+}: {
+  canArchive: boolean;
+  onResumeLive: () => Promise<void>;
+  onArchiveCycle: () => Promise<void>;
+  onResetLocal: () => Promise<void>;
+}) {
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Profile repair failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="dashboard-band repair-panel">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Profile Health</p>
+          <h2>A salary cycle already exists</h2>
+        </div>
+        <ShieldAlert size={20} aria-hidden="true" />
+      </div>
+      <div className="stack-list">
+        <p>
+          Bluehour found an open salary cycle, but setup has not been marked complete. This usually means the first salary-cycle start was
+          interrupted after financial records were saved.
+        </p>
+        <p>The safe repair preserves the open cycle and marks this browser as a live profile. It does not change amounts, budgets, or transactions.</p>
+        <div className="form-actions">
+          <button className="primary-action" type="button" onClick={() => void run(onResumeLive)} disabled={busy}>
+            Resume as live profile
+          </button>
+        </div>
+        <div className="continue-device-card">
+          <strong>Archive accidental cycle and continue onboarding</strong>
+          <p>
+            Use this only if the salary cycle was created by mistake. Bluehour archives only records it can identify as the first-cycle start.
+            If the records are ambiguous, this action is blocked.
+          </p>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={confirmArchive} onChange={(event) => setConfirmArchive(event.target.checked)} disabled={!canArchive || busy} />
+            I understand this archives the accidental first-cycle records.
+          </label>
+          <button className="secondary-action" type="button" onClick={() => void run(onArchiveCycle)} disabled={!canArchive || !confirmArchive || busy}>
+            Archive accidental cycle
+          </button>
+        </div>
+        <div className="continue-device-card">
+          <strong>Reset this browser only</strong>
+          <p>
+            This clears only this browser's local live profile. If Google Drive vault sync is still connected, reconnecting may restore the remote
+            profile. To start completely fresh, reset the hidden Google Drive vault too from Settings after exporting a backup.
+          </p>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={confirmReset} onChange={(event) => setConfirmReset(event.target.checked)} disabled={busy} />
+            I understand this resets local setup data on this browser.
+          </label>
+          <button className="secondary-action danger-action" type="button" onClick={() => void run(onResetLocal)} disabled={!confirmReset || busy}>
+            Reset local setup
+          </button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
       </div>
     </section>
   );
@@ -905,9 +1031,14 @@ function FirstCycleForm({
   const [currentBalance, setCurrentBalance] = useState("");
   const [destinationAccountId, setDestinationAccountId] = useState(accounts[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (saving) {
+      return;
+    }
+    setSaving(true);
     setError(null);
     try {
       if (!destinationAccountId) {
@@ -926,6 +1057,8 @@ function FirstCycleForm({
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start salary cycle");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -963,13 +1096,21 @@ function FirstCycleForm({
         </label>
         {error ? <p className="form-error span-3">{error}</p> : null}
         <div className="form-actions span-3">
-          <button className="primary-action" type="submit">
-            Start live profile
+          <button className="primary-action" type="submit" disabled={saving}>
+            {saving ? "Starting..." : "Start live profile"}
           </button>
         </div>
       </form>
     </section>
   );
+}
+
+function safeReadManifest(settings: readonly AppSettings[]) {
+  try {
+    return readProfileManifest(settings);
+  } catch {
+    return null;
+  }
 }
 
 function preferencesFromSettings(settings: readonly AppSettings[]): PreferencesSettings {

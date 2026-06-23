@@ -8,9 +8,11 @@ Bluehour is a React + TypeScript personal cash-flow and salary-cycle budgeting a
 
 The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md` for the exact verified status and the manual Google release gate.
 
-Current release-candidate target: `1.0.0-rc.3`.
+Current release-candidate target: `1.0.0-rc.4`.
 
-RC3 adds Savings Coach: leak detection, purchase checks, savings goals, Save-the-Difference, subscription value review, and end-of-cycle savings review. It also increments IndexedDB schema to v6, demo fixture version to v6, Drive vault schema to v2, and optional Google Sheet schema to v5 for Savings Coach records.
+RC4 adds Profile Health and Repair for manifest/snapshot inconsistencies, including the interrupted first salary-cycle state where setup is still marked in progress but one open salary cycle already exists. It also adds guarded hidden Google Drive vault reset from inside Bluehour and clearer Google Drive vault versus optional Sheet export copy.
+
+RC3 added Savings Coach: leak detection, purchase checks, savings goals, Save-the-Difference, subscription value review, and end-of-cycle savings review. The current IndexedDB schema is v6, demo fixture version is v6, Drive vault schema is v2, and optional Google Sheet schema is v5.
 
 ## Demo And Live Profiles
 
@@ -164,11 +166,17 @@ Bluehour writes the inactive slot, reads it back for runtime-schema validation a
 
 Google Sheets remain available from Settings as optional manual export/inspection using Sheet schema v5. Sheets are not used for login, onboarding, or daily sync.
 
+No Google Sheet is expected after signing in with Google. The primary sync copy lives in hidden Drive app data and is not visible in normal Drive or Sheets views unless the user explicitly creates an optional Sheet export.
+
 Cross-device recovery uses a typed `profileManifest` settings record synced with the live profile. It stores a random profile UUID, lifecycle (`setup`, `ready_for_salary`, `live`, or `read_only_recovery`), current onboarding checkpoint where relevant, MYR currency, app version metadata, timestamps, and optional last-writing local device ID. It does not store Google email, computer name, account numbers, or hardware identifiers.
 
 Each browser also has a random local device ID stored only in `bluehour-shell`. The optional local label stays local. The device ID is diagnostic metadata only, not authentication.
 
 Before pushing, Bluehour reads the current Drive vault revision and blocks stale-device writes when the remote profile has advanced. While a memory-only Google session is active, local live changes are queued and then pushed automatically. Sync pulls non-conflicting remote changes first, preserves local outbox changes, or creates explicit conflicts for same-record edits. Different profile IDs are never merged automatically.
+
+Profile Health checks the local profile and Drive recovery previews for lifecycle/cycle mismatches. When exactly one open salary cycle exists but the manifest still says setup or ready-for-salary, Bluehour can resume as live without changing amounts, transactions, or allocations. If the cycle was accidental, Bluehour can archive only safely identifiable first-cycle records after confirmation. See `docs/PROFILE_HEALTH.md`.
+
+Settings includes a guarded **Reset hidden Google Drive vault** action. It deletes the hidden app-data manifest and slot files for the current Google account, clears this browser's local Google connection descriptor, preserves local financial data and pending local outbox changes, and explains that reconnecting Google will create a fresh vault from the current local profile.
 
 Moving from laptop to desktop:
 

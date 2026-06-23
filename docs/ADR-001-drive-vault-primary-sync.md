@@ -20,7 +20,7 @@ Use hidden Google Drive `appDataFolder` files as the primary remote sync store f
 
 Bluehour writes the inactive slot, reads it back for runtime validation and record comparison, then updates the manifest last. IndexedDB remains the local working database. Demo profiles never create, push, pull, or sync a Drive vault.
 
-Google Sheets remain an optional manual export/inspection surface only. Current optional Sheet schema is v4 and includes `ExtraIncomeAllocations`.
+Google Sheets remain an optional manual export/inspection surface only. Current optional Sheet schema is v5 and includes Savings Coach records.
 
 ## Consequences
 
