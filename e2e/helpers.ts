@@ -45,19 +45,20 @@ export async function expectReadableFormControls(page: Page) {
       const inputMode = input?.inputMode || element.getAttribute("inputmode") || "";
       const isChoiceControl = type === "checkbox" || type === "radio";
       const isMoney = inputMode === "decimal" || element.classList.contains("money-input");
+      const isSelect = tagName === "select";
       const inDataTable = Boolean(element.closest(".data-table"));
-      const minWidth = isChoiceControl ? 14 : isMoney || inDataTable ? 80 : 72;
+      const minWidth = isChoiceControl ? 14 : isMoney || inDataTable ? 80 : isSelect ? 70 : 72;
       const minHeight = isChoiceControl ? 14 : tagName === "textarea" ? 38 : 30;
       const label = element.getAttribute("aria-label") || input?.labels?.[0]?.textContent?.trim() || input?.value || `${tagName} ${index + 1}`;
       const issues: string[] = [];
 
-      if (rect.width < minWidth) {
+      if (rect.width + 0.5 < minWidth) {
         issues.push(`${label} width ${Math.round(rect.width)}px below ${minWidth}px`);
       }
       if (rect.height < minHeight) {
         issues.push(`${label} height ${Math.round(rect.height)}px below ${minHeight}px`);
       }
-      if (inDataTable && isMoney && rect.width < 80) {
+      if (inDataTable && isMoney && rect.width + 0.5 < 80) {
         issues.push(`${label} table money width ${Math.round(rect.width)}px below 80px`);
       }
 

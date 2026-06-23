@@ -22,6 +22,7 @@ test.describe("accessibility automation", () => {
 
   test("command dialog has keyboard focus and passes automated axe checks", async ({ page }) => {
     await openDemo(page);
+    await page.getByRole("button", { name: "Open command menu" }).focus();
     await page.keyboard.press("ControlOrMeta+K");
 
     await expect(page.getByRole("dialog", { name: "Command menu" })).toBeVisible();
