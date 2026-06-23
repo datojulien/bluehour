@@ -168,6 +168,9 @@ export interface Subscription extends RecordMeta {
   annualRenewalDate?: IsoDate;
   cancellationDeadline?: IsoDate;
   essential: boolean;
+  valueRating?: "essential" | "useful" | "maybe" | "rarely_used";
+  lastReviewedOn?: IsoDate;
+  status?: "active" | "paused" | "archived";
   notes?: string;
   priceHistoryJson?: string;
 }
@@ -263,6 +266,51 @@ export interface ReviewSession extends RecordMeta {
   completedAt?: UtcIsoTimestamp;
 }
 
+export interface SavingsGoal extends RecordMeta {
+  name: string;
+  targetMinor: number;
+  currentManualMinor?: number;
+  deadline?: IsoDate;
+  priority: "low" | "normal" | "high";
+  linkedAccountId?: string;
+  linkedCategoryId?: string;
+  status: "active" | "paused" | "completed";
+  notes?: string;
+}
+
+export interface SavingsGoalContribution extends RecordMeta {
+  savingsGoalId: string;
+  amountMinor: number;
+  occurredOn: IsoDate;
+  source: "manual" | "protected_transfer" | "save_difference" | "extra_income" | "cycle_close";
+  status: "manual" | "pending_transfer" | "completed";
+  linkedTransactionId?: string;
+  linkedBudgetCycleId?: string;
+  note?: string;
+}
+
+export interface CoachInsightDecision extends RecordMeta {
+  insightFingerprint: string;
+  decision: "dismissed" | "accepted" | "snoozed" | "converted_to_goal" | "converted_to_plan";
+  decidedAt: UtcIsoTimestamp;
+  snoozedUntil?: IsoDate;
+  linkedSavingsGoalId?: string;
+  linkedPlanInstanceId?: string;
+}
+
+export interface PurchaseCheck extends RecordMeta {
+  checkedOn: IsoDate;
+  label: string;
+  categoryId: string;
+  amountMinor: number;
+  result: "safe" | "caution" | "not_recommended";
+  safeToSpendBeforeMinor: number;
+  safeToSpendAfterMinor: number;
+  decision: "bought" | "waited" | "planned" | "dismissed";
+  linkedTransactionId?: string;
+  linkedPlanInstanceId?: string;
+}
+
 export interface RecurringRule extends RecordMeta {
   name: string;
   kind: "income" | "expense" | "transfer" | "subscription";
@@ -347,6 +395,10 @@ export interface BluehourSnapshot {
   planInstances: PlanInstance[];
   subscriptions: Subscription[];
   extraIncomeAllocations: ExtraIncomeAllocation[];
+  savingsGoals: SavingsGoal[];
+  savingsGoalContributions: SavingsGoalContribution[];
+  coachInsightDecisions: CoachInsightDecision[];
+  purchaseChecks: PurchaseCheck[];
   categorisationRules: CategorisationRule[];
   importProfiles: ImportProfile[];
   importBatches: ImportBatch[];

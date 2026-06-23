@@ -15,7 +15,7 @@ Google Sheets are optional export/inspection only. They are not used for login, 
 
 ## Drive Vault Schema
 
-Current Drive vault schema version: `1`.
+Current Drive vault schema version: `2`.
 
 The vault uses three hidden Drive app-data files:
 
@@ -87,7 +87,7 @@ Bluehour does not store refresh tokens. The current browser tab may reuse an acc
 
 ## Optional Sheet Export
 
-Settings can create or update a Google Sheet for manual inspection. Sheet schema v4 uses `Meta`, active/inactive tabs, runtime validation, read-back comparison, and the `ExtraIncomeAllocations` tab. Legacy v1, v2, and v3 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
+Settings can create or update a Google Sheet for manual inspection. Sheet schema v5 uses `Meta`, active/inactive tabs, runtime validation, read-back comparison, `ExtraIncomeAllocations`, `SavingsGoals`, `SavingsGoalContributions`, `CoachInsightDecisions`, and `PurchaseChecks` tabs. Legacy v1, v2, v3, and v4 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
 
 ## Testing
 

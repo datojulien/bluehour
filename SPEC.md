@@ -15,13 +15,14 @@
 
 ## 1. Product definition
 
-Bluehour is not a general accounting suite and not an investment-trading terminal. It is a personal cash-flow and salary-cycle budgeting application with five primary jobs:
+Bluehour is not a general accounting suite and not an investment-trading terminal. It is a personal cash-flow and salary-cycle budgeting application with six primary jobs:
 
 1. Make transaction entry quick enough for daily use.
 2. Reserve money for obligations before showing discretionary money.
 3. Forecast the next salary date, the calendar month, and the next 30 days.
 4. Help the user maintain category budgets without forcing a rigid budgeting ideology.
-5. Keep the data portable through the hidden Google Drive app-data vault, optional Google Sheet inspection export, CSV exports, and encrypted JSON backups.
+5. Help the user find explicit, user-approved savings opportunities during the salary cycle.
+6. Keep the data portable through the hidden Google Drive app-data vault, optional Google Sheet inspection export, CSV exports, and encrypted JSON backups.
 
 ### Product principles
 
@@ -133,11 +134,12 @@ A slim left sidebar on desktop:
 1. Overview
 2. Transactions
 3. Plan
-4. Budgets
-5. Subscriptions
-6. Net Worth
-7. Review
-8. Settings
+4. Coach
+5. Budgets
+6. Subscriptions
+7. Net Worth
+8. Review
+9. Settings
 
 Persistent controls:
 
@@ -806,6 +808,9 @@ Fields:
 - Cancellation deadline, optional
 - Notes
 - Price history
+- Value rating
+- Last reviewed date
+- Review status: active, paused, archived
 
 Alerts:
 
@@ -813,6 +818,21 @@ Alerts:
 - Annual renewal due within 30 days
 
 Annual subscriptions show monthly equivalent cost, but v1 does not automatically create a monthly sinking fund.
+
+### Savings Coach
+
+Savings Coach is deterministic, local-only educational guidance. It never calls external services and never applies financial actions automatically.
+
+Primary workflows:
+
+- Spending Leak Detector for category pacing, cycle increases, small purchase clusters, merchant concentration, merchant watchlist matches, subscription reviews, new recurring costs, and extra-income spend-through.
+- Can I Buy This? purchase checks against safe-to-spend and category remaining amounts.
+- Savings Goals with manual, protected-transfer, Save-the-Difference, extra-income, and cycle-close contribution sources.
+- Save-the-Difference suggestions from underspent discretionary envelopes.
+- Subscription Optimiser value/status review.
+- End-of-Cycle Savings Review.
+
+Savings Coach persists goals, contributions, insight decisions, and purchase checks only after explicit user action. Budget transfers, categorisation rules, reconciliation adjustments, buffer changes, savings contributions, subscription status changes, and sync conflicts still require explicit approval.
 
 ---
 

@@ -25,7 +25,7 @@ describe("Google Sheets adapter", () => {
 
     expect(descriptor).toEqual({
       spreadsheetId: "sheet-1",
-      sheetSchemaVersion: 4,
+      sheetSchemaVersion: 5,
       profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
       lastKnownRemoteRevision: 4,
       lastSuccessfulSyncAt: "2026-06-22T09:42:00.000Z"
@@ -129,6 +129,7 @@ describe("Google Sheets adapter", () => {
     const missing = await ensureBluehourSheetSchema("sheet", "token", fetcher as unknown as typeof fetch);
 
     expect(missing).not.toContain("A_Accounts");
+    expect(missing).toContain("B_SavingsGoals");
     expect(missing).toContain("B_Settings");
     const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
     const batchBody = JSON.parse(String(calls[1][1].body));

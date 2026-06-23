@@ -175,7 +175,7 @@ export async function mockDriveAppDataVault(
     const exportedAt = "2026-06-22T09:42:00.000Z";
     register(names.manifest, "drive-manifest-file", {
       kind: "bluehour-drive-vault-manifest",
-      schemaVersion: 1,
+      schemaVersion: 2,
       remoteRevision,
       activeSlot: "A",
       profileId,
@@ -188,11 +188,11 @@ export async function mockDriveAppDataVault(
     });
     register(names.slotA, "drive-slot-a-file", {
       kind: "bluehour-drive-vault-slot",
-      schemaVersion: 1,
+      schemaVersion: 2,
       remoteRevision,
       profileId,
       exportedAt,
-      appVersion: "1.0.0-rc.2",
+      appVersion: "1.0.0-rc.3",
       snapshot: {
         accounts: [
           {
@@ -224,7 +224,7 @@ export async function mockDriveAppDataVault(
               onboardingStep: options.onboardingStep ?? "budget",
               createdAt: exportedAt,
               updatedAt: exportedAt,
-              createdByAppVersion: "1.0.0-rc.2"
+              createdByAppVersion: "1.0.0-rc.3"
             }),
             createdAt: exportedAt,
             updatedAt: exportedAt,

@@ -8,6 +8,7 @@ import {
   Landmark,
   LayoutDashboard,
   ListChecks,
+  PiggyBank,
   Plus,
   ReceiptText,
   RefreshCcw,
@@ -23,6 +24,7 @@ const navigation = [
   { label: "Overview", to: "/", icon: LayoutDashboard },
   { label: "Transactions", to: "/transactions", icon: ReceiptText },
   { label: "Plan", to: "/plan", icon: CalendarDays },
+  { label: "Coach", to: "/coach", icon: PiggyBank },
   { label: "Budgets", to: "/budgets", icon: BarChart3 },
   { label: "Subscriptions", to: "/subscriptions", icon: FileText },
   { label: "Net Worth", to: "/net-worth", icon: Landmark },
@@ -49,11 +51,12 @@ export function AppShell() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.metaKey && event.key.toLowerCase() === "n") {
+      const commandKey = event.metaKey || event.ctrlKey;
+      if (commandKey && event.key.toLowerCase() === "n") {
         event.preventDefault();
         openTransactionComposer();
       }
-      if (event.metaKey && event.key.toLowerCase() === "k") {
+      if (commandKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandMenuOpen(true);
       }
@@ -62,8 +65,8 @@ export function AppShell() {
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
   });
 
   useEffect(() => {
@@ -233,6 +236,24 @@ export function AppShell() {
                   {item.label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  navigate("/coach#purchase");
+                  setCommandMenuOpen(false);
+                }}
+              >
+                Can I Buy This?
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  navigate("/coach#goals");
+                  setCommandMenuOpen(false);
+                }}
+              >
+                Create savings goal
+              </button>
               <button
                 type="button"
                 onClick={() => {

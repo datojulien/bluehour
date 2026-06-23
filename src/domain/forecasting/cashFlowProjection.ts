@@ -3,6 +3,7 @@ import { calculateCategoryAllocation, calculateRemainingAllocation } from "../bu
 import { addDays, compareIsoDate, daysBetweenInclusive, isWithinInclusive } from "../dates";
 import { clampNonNegative, percentageOfMinor } from "../money";
 import { pendingProtectedExtraIncomeMinor } from "../income/extraIncomeAllocation";
+import { pendingProtectedSavingsMinor } from "../coach/savingsGoals";
 import { calculateCategoryActuals } from "../transactions/calculations";
 import type {
   Account,
@@ -452,7 +453,12 @@ function buildSubscriptionEvents(
   categoryById: Map<string, Category>
 ): ProjectedCashEvent[] {
   return subscriptions
-    .filter((subscription) => isActive(subscription) && isWithinInclusive(subscription.nextPaymentDate, draft.startDate, draft.endDate))
+    .filter(
+      (subscription) =>
+        isActive(subscription) &&
+        (subscription.status ?? "active") === "active" &&
+        isWithinInclusive(subscription.nextPaymentDate, draft.startDate, draft.endDate)
+    )
     .flatMap((subscription) => {
       const rule = recurringRules.find((item) => item.id === subscription.recurringRuleId && isActive(item));
       if (!rule) {
@@ -555,7 +561,8 @@ function buildProtectedContributionEvents(
   const protectedTargetMinor =
     percentageOfMinor(draft.cycle.actualMainSalaryMinor, draft.cycle.protectedRateBasisPoints) +
     (draft.cycle.additionalProtectedCommitmentMinor ?? 0) +
-    (draft.isVirtual ? 0 : pendingProtectedExtraIncomeMinor(input.snapshot, draft.cycle));
+    (draft.isVirtual ? 0 : pendingProtectedExtraIncomeMinor(input.snapshot, draft.cycle)) +
+    (draft.isVirtual ? 0 : pendingProtectedSavingsMinor(input.snapshot.savingsGoalContributions, draft.cycle));
   const completedProtectedMinor = draft.isVirtual ? 0 : calculateCompletedProtectedTransfers(input, draft.cycle, input.asOfDate);
   const plannedProtectedMinor = representedEvents
     .filter((event) => event.kind === "protected_transfer" && event.deltaMinor < 0)

@@ -3,6 +3,9 @@ import type { BluehourSnapshot, IsoDate, ReviewSession } from "../types";
 import { isActive } from "../types";
 import { calculateSafeToSpend } from "../forecasting/safeToSpend";
 import { createRecordMeta, touchRecord } from "../records";
+import { readSavingsCoachPreferences } from "../coach/preferences";
+import { detectSaveDifferenceOpportunities } from "../coach/saveDifference";
+import { detectSpendingLeaks } from "../coach/spendingLeakDetector";
 
 export interface DailyReviewTask {
   id: string;
@@ -55,6 +58,18 @@ export function dailyReviewTasks(snapshot: BluehourSnapshot, asOfDate: IsoDate):
     });
   }
 
+  const pendingSavingsContributions = snapshot.savingsGoalContributions.filter(
+    (contribution) => isActive(contribution) && contribution.status === "pending_transfer"
+  ).length;
+  if (pendingSavingsContributions > 0) {
+    tasks.push({
+      id: "pending-savings-contributions",
+      label: `Confirm ${pendingSavingsContributions} pending savings contribution${pendingSavingsContributions === 1 ? "" : "s"}`,
+      complete: false,
+      route: "/coach"
+    });
+  }
+
   if (snapshot.outboxOperations.length > 0 || snapshot.syncState.some((state) => state.status === "needs_reconnection" || state.status === "failed")) {
     tasks.push({
       id: "sync-pending",
@@ -80,6 +95,7 @@ export function dailyReviewTasks(snapshot: BluehourSnapshot, asOfDate: IsoDate):
       budgetTransfers: snapshot.budgetTransfers,
       planInstances: snapshot.planInstances,
       extraIncomeAllocations: snapshot.extraIncomeAllocations,
+      savingsGoalContributions: snapshot.savingsGoalContributions,
       includeFutureIncome: false
     });
     if (result.shortfallMinor > 0) {
@@ -88,6 +104,27 @@ export function dailyReviewTasks(snapshot: BluehourSnapshot, asOfDate: IsoDate):
         label: "Inspect the newly projected shortfall",
         complete: false,
         route: "/"
+      });
+    }
+
+    const preferences = readSavingsCoachPreferences(snapshot.settings);
+    const insights = detectSpendingLeaks(snapshot, activeCycle, asOfDate, preferences);
+    if (insights.length > 0) {
+      tasks.push({
+        id: "savings-coach-insights",
+        label: `Review ${insights.length} Savings Coach insight${insights.length === 1 ? "" : "s"}`,
+        complete: false,
+        route: "/coach"
+      });
+    }
+
+    const opportunities = detectSaveDifferenceOpportunities(snapshot, activeCycle, asOfDate);
+    if (opportunities.length > 0) {
+      tasks.push({
+        id: "save-the-difference",
+        label: `Review ${opportunities.length} Save-the-Difference opportunit${opportunities.length === 1 ? "y" : "ies"}`,
+        complete: false,
+        route: "/coach"
       });
     }
   }

@@ -10,15 +10,19 @@ import type {
   Category,
   ConflictRecord,
   AppSettings,
+  CoachInsightDecision,
   ExtraIncomeAllocation,
   ImportBatch,
   ImportProfile,
   ImportRowAudit,
   OutboxOperation,
   PlanInstance,
+  PurchaseCheck,
   Reconciliation,
   ReviewSession,
   RecurringRule,
+  SavingsGoal,
+  SavingsGoalContribution,
   SyncState,
   Subscription,
   Transaction,
@@ -36,6 +40,7 @@ import {
   budgetTransferSchema,
   categorisationRuleSchema,
   categorySchema,
+  coachInsightDecisionSchema,
   conflictRecordSchema,
   appSettingsSchema,
   extraIncomeAllocationSchema,
@@ -44,9 +49,12 @@ import {
   importRowAuditSchema,
   outboxOperationSchema,
   planInstanceSchema,
+  purchaseCheckSchema,
   reconciliationSchema,
   reviewSessionSchema,
   recurringRuleSchema,
+  savingsGoalContributionSchema,
+  savingsGoalSchema,
   syncStateSchema,
   subscriptionSchema,
   transactionLegSchema,
@@ -62,9 +70,9 @@ export const PROFILE_DB_NAMES: Record<ProfileId, string> = {
   live: "bluehour-profile-live"
 };
 
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 export const INDEXED_DB_SCHEMA_VERSION = DB_VERSION;
-export const DEMO_FIXTURE_VERSION = "v1-local-demo-v5";
+export const DEMO_FIXTURE_VERSION = "v1-local-demo-v6";
 const CATEGORY_TAXONOMY_MIGRATION_VERSION = "v1-category-taxonomy-rc2";
 
 interface LocalMeta {
@@ -86,6 +94,10 @@ interface BluehourDB extends DBSchema {
   planInstances: { key: string; value: PlanInstance };
   subscriptions: { key: string; value: Subscription };
   extraIncomeAllocations: { key: string; value: ExtraIncomeAllocation };
+  savingsGoals: { key: string; value: SavingsGoal };
+  savingsGoalContributions: { key: string; value: SavingsGoalContribution };
+  coachInsightDecisions: { key: string; value: CoachInsightDecision };
+  purchaseChecks: { key: string; value: PurchaseCheck };
   categorisationRules: { key: string; value: CategorisationRule };
   importProfiles: { key: string; value: ImportProfile };
   importBatches: { key: string; value: ImportBatch };
@@ -113,6 +125,10 @@ type DomainStoreName =
   | "planInstances"
   | "subscriptions"
   | "extraIncomeAllocations"
+  | "savingsGoals"
+  | "savingsGoalContributions"
+  | "coachInsightDecisions"
+  | "purchaseChecks"
   | "categorisationRules"
   | "importProfiles"
   | "importBatches"
@@ -135,6 +151,10 @@ const DOMAIN_STORES = [
   "planInstances",
   "subscriptions",
   "extraIncomeAllocations",
+  "savingsGoals",
+  "savingsGoalContributions",
+  "coachInsightDecisions",
+  "purchaseChecks",
   "categorisationRules",
   "importProfiles",
   "importBatches",
@@ -211,6 +231,10 @@ export async function seedDemoIfNeeded(): Promise<void> {
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
   await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
+  await putAll(tx.objectStore("savingsGoals"), snapshot.savingsGoals);
+  await putAll(tx.objectStore("savingsGoalContributions"), snapshot.savingsGoalContributions);
+  await putAll(tx.objectStore("coachInsightDecisions"), snapshot.coachInsightDecisions);
+  await putAll(tx.objectStore("purchaseChecks"), snapshot.purchaseChecks);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
@@ -251,6 +275,10 @@ export async function resetDemoProfile(): Promise<void> {
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
   await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
+  await putAll(tx.objectStore("savingsGoals"), snapshot.savingsGoals);
+  await putAll(tx.objectStore("savingsGoalContributions"), snapshot.savingsGoalContributions);
+  await putAll(tx.objectStore("coachInsightDecisions"), snapshot.coachInsightDecisions);
+  await putAll(tx.objectStore("purchaseChecks"), snapshot.purchaseChecks);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
@@ -365,13 +393,16 @@ export async function loadProfileSnapshot(profileId: ProfileId): Promise<Bluehou
     planInstances: await db.getAll("planInstances"),
     subscriptions: await db.getAll("subscriptions"),
     extraIncomeAllocations: await db.getAll("extraIncomeAllocations"),
+    savingsGoals: await db.getAll("savingsGoals"),
+    savingsGoalContributions: await db.getAll("savingsGoalContributions"),
+    coachInsightDecisions: await db.getAll("coachInsightDecisions"),
+    purchaseChecks: await db.getAll("purchaseChecks"),
     categorisationRules: await db.getAll("categorisationRules"),
     importProfiles: await db.getAll("importProfiles"),
     importBatches: await db.getAll("importBatches"),
     importRowAudits: await db.getAll("importRowAudits"),
     reconciliations: await db.getAll("reconciliations"),
-    reviewSessions: await db.getAll("reviewSessions")
-    ,
+    reviewSessions: await db.getAll("reviewSessions"),
     settings: await db.getAll("settings"),
     outboxOperations: await db.getAll("outboxOperations"),
     conflicts: await db.getAll("conflicts"),
@@ -463,6 +494,10 @@ export function validateSnapshot(snapshot: BluehourSnapshot): void {
   snapshot.planInstances.forEach((record) => planInstanceSchema.parse(record));
   snapshot.subscriptions.forEach((record) => subscriptionSchema.parse(record));
   snapshot.extraIncomeAllocations.forEach((record) => extraIncomeAllocationSchema.parse(record));
+  snapshot.savingsGoals.forEach((record) => savingsGoalSchema.parse(record));
+  snapshot.savingsGoalContributions.forEach((record) => savingsGoalContributionSchema.parse(record));
+  snapshot.coachInsightDecisions.forEach((record) => coachInsightDecisionSchema.parse(record));
+  snapshot.purchaseChecks.forEach((record) => purchaseCheckSchema.parse(record));
   snapshot.categorisationRules.forEach((record) => categorisationRuleSchema.parse(record));
   snapshot.importProfiles.forEach((record) => importProfileSchema.parse(record));
   snapshot.importBatches.forEach((record) => importBatchSchema.parse(record));
@@ -497,6 +532,10 @@ export async function replaceProfileSnapshot(profileId: ProfileId, snapshot: Blu
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
   await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
+  await putAll(tx.objectStore("savingsGoals"), snapshot.savingsGoals);
+  await putAll(tx.objectStore("savingsGoalContributions"), snapshot.savingsGoalContributions);
+  await putAll(tx.objectStore("coachInsightDecisions"), snapshot.coachInsightDecisions);
+  await putAll(tx.objectStore("purchaseChecks"), snapshot.purchaseChecks);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);

@@ -4,7 +4,7 @@ import type { BluehourSnapshot, SyncState } from "../../domain/types";
 import { syncedStoreSchemas } from "../local-db/validators";
 import { currentRemoteRevision, SYNCED_STORES, type RemoteSnapshotForSync } from "../sync/remoteSync";
 
-export const DRIVE_VAULT_SCHEMA_VERSION = 1;
+export const DRIVE_VAULT_SCHEMA_VERSION = 2;
 export const DRIVE_VAULT_MANIFEST_NAME = "bluehour-manifest.json";
 export const DRIVE_VAULT_SLOT_A_NAME = "bluehour-slot-A.json";
 export const DRIVE_VAULT_SLOT_B_NAME = "bluehour-slot-B.json";

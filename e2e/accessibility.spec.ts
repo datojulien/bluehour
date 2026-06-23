@@ -12,7 +12,7 @@ test.describe("accessibility automation", () => {
     test.setTimeout(60_000);
     await openDemo(page);
 
-    for (const path of ["/", "/#/transactions", "/#/plan", "/#/budgets", "/#/subscriptions", "/#/net-worth", "/#/review", "/#/settings"]) {
+    for (const path of ["/", "/#/transactions", "/#/plan", "/#/coach", "/#/budgets", "/#/subscriptions", "/#/net-worth", "/#/review", "/#/settings"]) {
       await page.goto(path);
       await expect(page.locator("main h1, h1").first()).toBeVisible();
       const results = await new AxeBuilder({ page }).analyze();

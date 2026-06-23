@@ -287,10 +287,41 @@ export function createDemoSnapshot(): BluehourSnapshot {
       nextPaymentDate: "2026-07-23",
       annualRenewalDate: "2026-11-23",
       essential: false,
+      valueRating: "maybe",
+      lastReviewedOn: "2026-06-30",
+      status: "active",
       notes: "Fictional demo subscription."
     }
   ];
   const extraIncomeAllocations: BluehourSnapshot["extraIncomeAllocations"] = [];
+  const savingsGoals: BluehourSnapshot["savingsGoals"] = [
+    {
+      ...meta("goal-emergency-buffer"),
+      name: "Emergency buffer",
+      targetMinor: 300_000,
+      currentManualMinor: 90_000,
+      deadline: "2026-12-31",
+      priority: "high",
+      linkedAccountId: "acc-blue-jar-savings",
+      linkedCategoryId: "cat-savings",
+      status: "active",
+      notes: "Fictional demo savings goal."
+    }
+  ];
+  const savingsGoalContributions: BluehourSnapshot["savingsGoalContributions"] = [
+    {
+      ...meta("goal-contribution-july-manual"),
+      savingsGoalId: "goal-emergency-buffer",
+      amountMinor: 15_000,
+      occurredOn: "2026-07-01",
+      source: "manual",
+      status: "manual",
+      linkedBudgetCycleId: "cycle-2026-06-24",
+      note: "Fictional demo contribution."
+    }
+  ];
+  const coachInsightDecisions: BluehourSnapshot["coachInsightDecisions"] = [];
+  const purchaseChecks: BluehourSnapshot["purchaseChecks"] = [];
 
   const recurringRules: RecurringRule[] = [
     {
@@ -416,7 +447,18 @@ export function createDemoSnapshot(): BluehourSnapshot {
         minimumProtectedRateBasisPoints: 1000,
         bufferMinimumMinor: 50_000,
         bufferEssentialRateBasisPoints: 1000,
-        nearLimitThreshold: 80
+        nearLimitThreshold: 80,
+        savingsCoach: {
+          enabled: true,
+          insightSensitivity: "normal",
+          smallPurchaseThresholdMinor: 2_000,
+          smallPurchaseWindowDays: 31,
+          merchantWatchlist: ["orchid"],
+          categoryReductionTargets: [],
+          defaultGoalPriority: "normal",
+          saveDifferenceDefault: "ask",
+          snoozeDays: 14
+        }
       })
     },
     {
@@ -424,7 +466,7 @@ export function createDemoSnapshot(): BluehourSnapshot {
       key: "googleConnection",
       valueJson: JSON.stringify({
         spreadsheetId: "",
-        schemaVersion: 1
+        schemaVersion: 5
       })
     }
   ];
@@ -453,6 +495,10 @@ export function createDemoSnapshot(): BluehourSnapshot {
     planInstances,
     subscriptions,
     extraIncomeAllocations,
+    savingsGoals,
+    savingsGoalContributions,
+    coachInsightDecisions,
+    purchaseChecks,
     categorisationRules,
     importProfiles,
     importBatches,

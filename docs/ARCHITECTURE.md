@@ -10,7 +10,7 @@ flowchart TD
   Provider --> LiveDB[bluehour-profile-live IndexedDB]
   LiveDB --> Sync[Remote snapshot sync planner]
   Sync --> Drive[Hidden Drive app-data vault slots]
-  LiveDB -. optional export .-> Sheets[Google Sheet v4 inspection export]
+  LiveDB -. optional export .-> Sheets[Google Sheet v5 inspection export]
   Provider --> Domain[Pure domain services]
 ```
 
@@ -50,7 +50,7 @@ The Continue-with-Google recovery flow is intentionally read-only until confirma
 5. Require confirmation before replacing local live data.
 6. Reconstruct live IndexedDB and shell state from the manifest.
 
-Optional legacy v1/v2/v3/v4 Sheets remain inspection/export sources, not the primary recovery path.
+Optional legacy v1/v2/v3/v4 Sheets and current v5 Sheets remain inspection/export sources, not the primary recovery path.
 
 ## Clock Model
 
@@ -65,6 +65,8 @@ Demo mode uses a deterministic clock. Live mode uses the current browser-local d
 - Profile IDs are merge boundaries. Matching IDs use the normal sync planner; different IDs require explicit replace or cancel.
 - Forecasting is split between the safe-to-spend reserve calculation and a pure projected cash-flow engine. Salary boundaries are represented as explicit projection segments so payday belongs to the future cycle.
 - Extra-income protected allocations are explicit domain records. They reduce safe-to-spend while pending and require a confirmed protected transfer link before completion.
+- Savings Coach is a pure domain layer under `src/domain/coach`. React renders insights and persists only explicit user actions such as purchase checks, goal records, pending contributions, and insight decisions.
+- Pending savings-goal contributions reduce safe-to-spend and projected protected reserves until the user records or links the protected transfer.
 - Budget progress is derived from one shared domain model for Overview and Budgets, including spent amounts, future reserved plans, and overspend states.
 - Budget Coach is a pure domain recommendation engine under `src/domain/budgets`. React, IndexedDB, Google sync/export adapters, and browser APIs only provide inputs, render explanations, and persist explicit user approvals.
 - Budget Coach recommendations are transient. The app persists only coaching preferences inside the validated `preferences` setting and accepted allocation records after the user approves them.
@@ -87,3 +89,16 @@ Budget Coach calculates in this order:
 9. Unallocated safe-to-spend.
 
 Completed closed cycles can supply category medians for recommendations. Open cycles, archived records, transfers, reconciliation-only adjustments, and refund reversals that do not represent spending are excluded by the existing category-actual calculation path.
+
+## Savings Coach Flow
+
+Savings Coach calculates in this order:
+
+1. Read `savingsCoach` preferences from the existing preferences setting.
+2. Build spending leak insights from budget pacing, cycle deltas, small purchases, merchants, subscriptions, recurring rules, and extra-income allocation records.
+3. Evaluate purchase checks against safe-to-spend and shared budget-progress rows.
+4. Build savings-goal progress from active goals and completed/manual contributions.
+5. Suggest Save-the-Difference amounts only from discretionary envelope underspend.
+6. Build the end-of-cycle review from protected target, completed protected transfers, pending savings holds, goals, insights, and difference opportunities.
+
+All outputs are deterministic and local. No Savings Coach recommendation is applied without a user action.

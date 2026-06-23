@@ -7,6 +7,7 @@ const OverviewPage = lazy(() => import("../features/dashboard/OverviewPage").the
 const TransactionsPage = lazy(() => import("../features/transactions/TransactionsPage").then((module) => ({ default: module.TransactionsPage })));
 const BudgetsPage = lazy(() => import("../features/budgets/BudgetsPage").then((module) => ({ default: module.BudgetsPage })));
 const PlanPage = lazy(() => import("../features/plan/PlanPage").then((module) => ({ default: module.PlanPage })));
+const CoachPage = lazy(() => import("../features/coach/CoachPage").then((module) => ({ default: module.CoachPage })));
 const SubscriptionsPage = lazy(() => import("../features/subscriptions/SubscriptionsPage").then((module) => ({ default: module.SubscriptionsPage })));
 const NetWorthPage = lazy(() => import("../features/net-worth/NetWorthPage").then((module) => ({ default: module.NetWorthPage })));
 const ReviewPage = lazy(() => import("../features/reviews/ReviewPage").then((module) => ({ default: module.ReviewPage })));
@@ -56,6 +57,7 @@ export function App() {
         <Route index element={<OverviewPage />} />
         <Route path="transactions" element={<TransactionsPage />} />
         <Route path="plan" element={<PlanPage />} />
+        <Route path="coach" element={<CoachPage />} />
         <Route path="budgets" element={<BudgetsPage />} />
         <Route path="subscriptions" element={<SubscriptionsPage />} />
         <Route path="net-worth" element={<NetWorthPage />} />

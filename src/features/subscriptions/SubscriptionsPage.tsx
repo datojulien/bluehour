@@ -17,6 +17,8 @@ interface SubscriptionPriceHistoryEntry {
   nextAmountMinor: number;
 }
 
+type SubscriptionReviewStatus = "active" | "paused";
+
 interface SubscriptionDetailsPatch {
   provider: string;
   billingFrequency: Subscription["billingFrequency"];
@@ -27,6 +29,8 @@ interface SubscriptionDetailsPatch {
   accountId: string;
   categoryId: string;
   essential: boolean;
+  valueRating: Subscription["valueRating"];
+  status: SubscriptionReviewStatus;
   notes: string;
 }
 
@@ -109,7 +113,8 @@ export function SubscriptionsPage() {
       dayOfMonth: Number.parseInt(patch.nextPaymentDate.slice(-2), 10),
       fromAccountId: patch.accountId,
       categoryId: patch.categoryId,
-      essential: patch.essential
+      essential: patch.essential,
+      active: patch.status === "active"
     };
     const updatedSubscription: Subscription = {
       ...touchRecord(subscription),
@@ -119,6 +124,9 @@ export function SubscriptionsPage() {
       annualRenewalDate: patch.annualRenewalDate ? (patch.annualRenewalDate as Subscription["annualRenewalDate"]) : undefined,
       cancellationDeadline: patch.cancellationDeadline ? (patch.cancellationDeadline as Subscription["cancellationDeadline"]) : undefined,
       essential: patch.essential,
+      valueRating: patch.valueRating,
+      status: patch.status,
+      lastReviewedOn: asOfDate,
       notes: patch.notes || undefined
     };
     await saveRecords(
@@ -133,7 +141,7 @@ export function SubscriptionsPage() {
 
   async function archiveSubscription(subscription: Subscription, rule: RecurringRule | undefined, archiveFuturePlans: boolean) {
     const now = new Date().toISOString();
-    const archivedSubscription: Subscription = { ...touchRecord(subscription), archivedAt: now };
+    const archivedSubscription: Subscription = { ...touchRecord(subscription), status: "archived", archivedAt: now };
     const mutations: LocalMutation[] = [{ storeName: "subscriptions", record: archivedSubscription }];
     if (rule) {
       mutations.push({ storeName: "recurringRules", record: { ...touchRecord(rule), active: false } });
@@ -209,7 +217,7 @@ export function SubscriptionsPage() {
               <div className="data-row" key={subscription.id}>
                 <span>
                   <strong>{subscription.provider}</strong>
-                  <small>{subscription.essential ? "essential" : "optional"} · {subscription.notes ?? "No notes"}</small>
+                  <small>{subscription.essential ? "essential" : "optional"} · {subscription.valueRating ?? "not rated"} · {subscription.notes ?? "No notes"}</small>
                 </span>
                 <span>{subscription.billingFrequency}</span>
                 <span>{formatDisplayDate(subscription.nextPaymentDate)}</span>
@@ -230,6 +238,9 @@ export function SubscriptionsPage() {
                         : priceIncreased
                           ? "Price increased"
                           : "Scheduled"}
+                  <small>
+                    {(subscription.status ?? "active")} · reviewed {subscription.lastReviewedOn ? formatDisplayDate(subscription.lastReviewedOn) : "not yet"}
+                  </small>
                 </span>
                 <span>
                   {rule ? (
@@ -339,6 +350,8 @@ function SubscriptionDetailsForm({
   const [accountId, setAccountId] = useState(rule.fromAccountId ?? accounts[0]?.id ?? "");
   const [categoryId, setCategoryId] = useState(rule.categoryId ?? categories[0]?.id ?? "");
   const [essential, setEssential] = useState(subscription.essential);
+  const [valueRating, setValueRating] = useState<Subscription["valueRating"]>(subscription.valueRating ?? "useful");
+  const [status, setStatus] = useState<SubscriptionReviewStatus>(subscription.status === "paused" ? "paused" : "active");
   const [notes, setNotes] = useState(subscription.notes ?? "");
   const [error, setError] = useState<string | null>(null);
 
@@ -356,6 +369,8 @@ function SubscriptionDetailsForm({
         accountId,
         categoryId,
         essential,
+        valueRating,
+        status,
         notes
       });
     } catch (caught) {
@@ -395,6 +410,16 @@ function SubscriptionDetailsForm({
         <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
         Essential
       </label>
+      <select value={valueRating} onChange={(event) => setValueRating(event.target.value as Subscription["valueRating"])} aria-label={`${subscription.provider} value rating`}>
+        <option value="essential">essential</option>
+        <option value="useful">useful</option>
+        <option value="maybe">maybe</option>
+        <option value="rarely_used">rarely used</option>
+      </select>
+      <select value={status} onChange={(event) => setStatus(event.target.value as SubscriptionReviewStatus)} aria-label={`${subscription.provider} review status`}>
+        <option value="active">active</option>
+        <option value="paused">paused</option>
+      </select>
       <input value={notes} onChange={(event) => setNotes(event.target.value)} aria-label={`${subscription.provider} notes`} placeholder="Notes" />
       <button className="icon-button" type="submit" aria-label={`Save ${subscription.provider} details`}>
         <Save size={15} aria-hidden="true" />
@@ -460,6 +485,7 @@ function SubscriptionForm({
   const [annualRenewalDate, setAnnualRenewalDate] = useState("");
   const [cancellationDeadline, setCancellationDeadline] = useState("");
   const [billingFrequency, setBillingFrequency] = useState<Subscription["billingFrequency"]>("monthly");
+  const [valueRating, setValueRating] = useState<Subscription["valueRating"]>("useful");
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
   const [essential, setEssential] = useState(false);
@@ -495,6 +521,9 @@ function SubscriptionForm({
         annualRenewalDate: annualRenewalDate ? (annualRenewalDate as Subscription["annualRenewalDate"]) : undefined,
         cancellationDeadline: cancellationDeadline ? (cancellationDeadline as Subscription["cancellationDeadline"]) : undefined,
         essential,
+        valueRating,
+        status: "active",
+        lastReviewedOn: defaultDate as Subscription["lastReviewedOn"],
         notes: notes || undefined
       };
       const plan: PlanInstance = {
@@ -582,6 +611,15 @@ function SubscriptionForm({
         <label className="checkbox-label">
           <input type="checkbox" checked={essential} onChange={(event) => setEssential(event.target.checked)} />
           Essential
+        </label>
+        <label>
+          Value
+          <select value={valueRating} onChange={(event) => setValueRating(event.target.value as Subscription["valueRating"])}>
+            <option value="essential">essential</option>
+            <option value="useful">useful</option>
+            <option value="maybe">maybe</option>
+            <option value="rarely_used">rarely used</option>
+          </select>
         </label>
         <label className="span-3">
           Notes

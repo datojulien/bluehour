@@ -27,13 +27,13 @@ describe("Drive profile recovery", () => {
     const remote: RemoteDriveVaultSnapshot = {
       manifest: {
         kind: "bluehour-drive-vault-manifest",
-        schemaVersion: 1,
+        schemaVersion: 2,
         remoteRevision: 6,
         activeSlot: "B",
         files
       },
       activeSlot: "B",
-      schemaVersion: 1,
+      schemaVersion: 2,
       remoteRevision: 6,
       exportedAt: "2026-06-22T09:42:00.000Z",
       snapshot: snapshotForRemoteVault(source)

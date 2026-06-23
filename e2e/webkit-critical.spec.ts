@@ -14,6 +14,8 @@ test.describe("WebKit critical flows", () => {
     await page.getByRole("button", { name: /Explore demonstration/i }).click();
     await expect(page.locator(".hero-panel")).toBeVisible();
     await expect(page.getByText(/Projected main salary/i)).toBeVisible();
+    await page.goto("/#/coach");
+    await expect(page.getByRole("heading", { name: "Coach" })).toBeVisible();
 
     await page.getByRole("button", { name: /Enable privacy mode/i }).click();
     await expect(page.getByText("RM••••••").first()).toBeVisible();

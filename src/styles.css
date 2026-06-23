@@ -1530,6 +1530,95 @@ h3 {
     minmax(82px, 0.55fr);
 }
 
+.coach-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.coach-card {
+  display: grid;
+  gap: 10px;
+  min-height: 88px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7fafc;
+  box-shadow: inset 0 0 0 1px var(--slate-200);
+}
+
+.coach-card strong {
+  color: var(--navy-950);
+}
+
+.coach-card small {
+  color: var(--slate-500);
+}
+
+.coach-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7fafc;
+  box-shadow: inset 0 0 0 1px var(--slate-200);
+}
+
+.coach-result strong {
+  color: var(--navy-950);
+}
+
+.coach-result-safe {
+  background: var(--green-soft);
+}
+
+.coach-result-caution {
+  background: var(--amber-soft);
+}
+
+.coach-result-not_recommended {
+  background: var(--red-soft);
+}
+
+.coach-result ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--slate-700);
+}
+
+.coach-select-label,
+.subscription-value-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--slate-700);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.coach-select-label {
+  margin-bottom: 12px;
+}
+
+.coach-select-label select,
+.subscription-value-form select {
+  min-height: 38px;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--navy-950);
+  background: #fbfdff;
+}
+
+.subscription-value-form {
+  grid-template-columns: minmax(180px, 1.2fr) minmax(130px, 0.7fr) minmax(130px, 0.7fr) auto;
+  align-items: end;
+}
+
+.compact-form {
+  margin-bottom: 14px;
+}
+
 .checklist {
   display: grid;
   gap: 8px;
@@ -1660,11 +1749,16 @@ h3 {
   .coach-metric-grid,
   .coach-profile-grid,
   .coach-explanation-grid,
-  .coach-preference-grid.discretionary {
+  .coach-preference-grid.discretionary,
+  .coach-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .coach-preference-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .subscription-value-form {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -1789,6 +1883,8 @@ h3 {
   .coach-profile-grid,
   .coach-explanation-grid,
   .coach-preference-grid.discretionary,
+  .coach-grid,
+  .subscription-value-form,
   .coach-preference-row,
   .coach-allocation-row {
     grid-template-columns: 1fr;

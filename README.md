@@ -8,9 +8,9 @@ Bluehour is a React + TypeScript personal cash-flow and salary-cycle budgeting a
 
 The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md` for the exact verified status and the manual Google release gate.
 
-Current release-candidate target: `1.0.0-rc.2`.
+Current release-candidate target: `1.0.0-rc.3`.
 
-RC2 adds category taxonomy reconciliation, shared budget-progress math, extra-income allocation and protected-transfer linking, Daily Review generation, real Recent Activity and cycle comparison summaries, richer subscription management, IndexedDB schema v5, and optional Google Sheet schema v4 export.
+RC3 adds Savings Coach: leak detection, purchase checks, savings goals, Save-the-Difference, subscription value review, and end-of-cycle savings review. It also increments IndexedDB schema to v6, demo fixture version to v6, Drive vault schema to v2, and optional Google Sheet schema to v5 for Savings Coach records.
 
 ## Demo And Live Profiles
 
@@ -152,7 +152,7 @@ Access tokens are memory-only. Bluehour reuses a token inside the current tab fo
 
 Live mode stores the synced profile in hidden files under the user's Google Drive `appDataFolder`. These files are not visible in normal Drive browsing and are accessible only to Bluehour's OAuth client.
 
-Current Drive vault schema version: `1`.
+Current Drive vault schema version: `2`.
 
 The vault uses three app-data files:
 
@@ -162,7 +162,7 @@ The vault uses three app-data files:
 
 Bluehour writes the inactive slot, reads it back for runtime-schema validation and round-trip comparison, then updates `bluehour-manifest.json` last. The manifest stores schema version, remote revision, active slot, profile ID, app version, commit timestamp, and last writer device ID.
 
-Google Sheets remain available from Settings as optional manual export/inspection using Sheet schema v4. Sheets are not used for login, onboarding, or daily sync.
+Google Sheets remain available from Settings as optional manual export/inspection using Sheet schema v5. Sheets are not used for login, onboarding, or daily sync.
 
 Cross-device recovery uses a typed `profileManifest` settings record synced with the live profile. It stores a random profile UUID, lifecycle (`setup`, `ready_for_salary`, `live`, or `read_only_recovery`), current onboarding checkpoint where relevant, MYR currency, app version metadata, timestamps, and optional last-writing local device ID. It does not store Google email, computer name, account numbers, or hardware identifiers.
 
@@ -194,7 +194,7 @@ The service worker uses network-first navigation and versioned static-asset cach
 
 ## Forecasting And Imports
 
-Bluehour stores and calculates all MYR values as integer sen. Salary-day projections are segmented so the current cycle ends the day before payday and the virtual future cycle begins on payday. The cash-flow timeline includes confirmed income, projected salary, plan-reserved payments, subscriptions, dated plans, protected contribution assumptions, pending protected extra-income allocations, and deterministic essential-envelope distributions.
+Bluehour stores and calculates all MYR values as integer sen. Salary-day projections are segmented so the current cycle ends the day before payday and the virtual future cycle begins on payday. The cash-flow timeline includes confirmed income, projected salary, plan-reserved payments, subscriptions, dated plans, protected contribution assumptions, pending protected extra-income allocations, pending protected savings-goal contributions, and deterministic essential-envelope distributions.
 
 Budget progress is calculated once in the domain layer and shared by Overview and Budgets. It shows allocated, spent, future reserved, remaining, and overspend/no-allocation states without hard-coded progress fallbacks.
 
@@ -204,11 +204,26 @@ CSV imports save a durable audit row for every normalized row. Strong duplicates
 
 ## Review, Categories, And Subscriptions
 
-Daily Review derives tasks from uncategorised splits, due plans, uncertain imports, deferred extra income, sync issues, and projected shortfalls.
+Daily Review derives tasks from uncategorised splits, due plans, uncertain imports, deferred extra income, pending savings contributions, Savings Coach insights, Save-the-Difference opportunities, sync issues, and projected shortfalls.
 
 The category manager supports create, rename, archive, restore, reorder, and validated group/nature/reservation-mode changes. System categories are protected from archival.
 
-Subscriptions show actual amount, monthly equivalent, annual total, cancellation deadlines, renewal alerts, price-change alerts, editable metadata, and archive/cancel controls that preserve historical records.
+Subscriptions show actual amount, monthly equivalent, annual total, cancellation deadlines, renewal alerts, price-change alerts, value rating, review status, editable metadata, and archive/cancel controls that preserve historical records.
+
+## Savings Coach
+
+Savings Coach is deterministic, local-only educational guidance for improving savings during the salary cycle. It has a dedicated Coach route and restrained cues in Overview, Budgets, Review, Settings, and Subscriptions.
+
+It includes:
+
+- Spending Leak Detector for category pacing, merchant clusters, watchlist merchants, subscriptions, new recurring costs, and extra-income spend-through.
+- Can I Buy This? purchase checks against safe-to-spend and category remaining amounts.
+- Savings Goals with manual and pending protected contributions.
+- Save-the-Difference suggestions from underspent discretionary envelopes.
+- Subscription Optimiser value/status review.
+- End-of-Cycle Savings Review.
+
+Savings Coach never applies budget cuts, bank transfers, purchase decisions, subscription changes, or goal contributions automatically.
 
 ## Budget Coach
 

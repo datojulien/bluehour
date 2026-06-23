@@ -135,6 +135,9 @@ export const subscriptionSchema = metaSchema.extend({
   annualRenewalDate: isoDate.optional(),
   cancellationDeadline: isoDate.optional(),
   essential: z.boolean(),
+  valueRating: z.enum(["essential", "useful", "maybe", "rarely_used"]).optional(),
+  lastReviewedOn: isoDate.optional(),
+  status: z.enum(["active", "paused", "archived"]).optional(),
   notes: z.string().optional(),
   priceHistoryJson: z.string().optional()
 });
@@ -261,6 +264,51 @@ export const reviewSessionSchema = metaSchema.extend({
   completedAt: z.string().optional()
 });
 
+export const savingsGoalSchema = metaSchema.extend({
+  name: z.string().min(1),
+  targetMinor: minor.positive(),
+  currentManualMinor: minor.nonnegative().optional(),
+  deadline: isoDate.optional(),
+  priority: z.enum(["low", "normal", "high"]),
+  linkedAccountId: z.string().optional(),
+  linkedCategoryId: z.string().optional(),
+  status: z.enum(["active", "paused", "completed"]),
+  notes: z.string().optional()
+});
+
+export const savingsGoalContributionSchema = metaSchema.extend({
+  savingsGoalId: z.string(),
+  amountMinor: minor.positive(),
+  occurredOn: isoDate,
+  source: z.enum(["manual", "protected_transfer", "save_difference", "extra_income", "cycle_close"]),
+  status: z.enum(["manual", "pending_transfer", "completed"]),
+  linkedTransactionId: z.string().optional(),
+  linkedBudgetCycleId: z.string().optional(),
+  note: z.string().optional()
+});
+
+export const coachInsightDecisionSchema = metaSchema.extend({
+  insightFingerprint: z.string(),
+  decision: z.enum(["dismissed", "accepted", "snoozed", "converted_to_goal", "converted_to_plan"]),
+  decidedAt: z.string(),
+  snoozedUntil: isoDate.optional(),
+  linkedSavingsGoalId: z.string().optional(),
+  linkedPlanInstanceId: z.string().optional()
+});
+
+export const purchaseCheckSchema = metaSchema.extend({
+  checkedOn: isoDate,
+  label: z.string(),
+  categoryId: z.string(),
+  amountMinor: minor.positive(),
+  result: z.enum(["safe", "caution", "not_recommended"]),
+  safeToSpendBeforeMinor: minor,
+  safeToSpendAfterMinor: minor,
+  decision: z.enum(["bought", "waited", "planned", "dismissed"]),
+  linkedTransactionId: z.string().optional(),
+  linkedPlanInstanceId: z.string().optional()
+});
+
 export const recurringRuleSchema = metaSchema.extend({
   name: z.string(),
   kind: z.enum(["income", "expense", "transfer", "subscription"]),
@@ -362,6 +410,10 @@ export const syncedStoreSchemas = {
   planInstances: planInstanceSchema,
   subscriptions: subscriptionSchema,
   extraIncomeAllocations: extraIncomeAllocationSchema,
+  savingsGoals: savingsGoalSchema,
+  savingsGoalContributions: savingsGoalContributionSchema,
+  coachInsightDecisions: coachInsightDecisionSchema,
+  purchaseChecks: purchaseCheckSchema,
   categorisationRules: categorisationRuleSchema,
   importProfiles: importProfileSchema,
   importBatches: importBatchSchema,

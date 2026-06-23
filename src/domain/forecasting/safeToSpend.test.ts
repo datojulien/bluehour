@@ -91,6 +91,26 @@ describe("safe-to-spend engine", () => {
     expect(result.protectedReserveMinor).toBe(83_000);
   });
 
+  it("reserves pending savings goal contributions as protected savings", () => {
+    const demo = createDemoSnapshot();
+    const pendingContribution = {
+      ...demo.savingsGoalContributions[0],
+      id: "goal-contribution-pending-test",
+      amountMinor: 20_000,
+      source: "save_difference" as const,
+      status: "pending_transfer" as const,
+      linkedBudgetCycleId: demo.budgetCycles[0].id
+    };
+    const result = calculateSafeToSpend(
+      inputFromDemo(demo, {
+        savingsGoalContributions: [...demo.savingsGoalContributions, pendingContribution]
+      })
+    );
+
+    expect(result.breakdown.protectedTargetMinor).toBe(98_000);
+    expect(result.protectedReserveMinor).toBe(18_000);
+  });
+
   it("uses the larger of RM500 or 10% of remaining essential obligations for the buffer", () => {
     const demo = createDemoSnapshot();
     const largePlan: PlanInstance = {

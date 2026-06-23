@@ -39,7 +39,11 @@ Remote restore is atomic from the user's perspective: validation happens before 
 
 ## Optional Sheet Inspection
 
-Legacy v1/v2/v3 Sheets may not contain a profile manifest. Current v4 Sheets include `ExtraIncomeAllocations` for inspection export. Bluehour keeps Sheet code for optional export and legacy inspection, but Sheets are not the primary recovery or sync source.
+Legacy v1/v2/v3 Sheets may not contain a profile manifest. Current v5 Sheets include `ExtraIncomeAllocations`, `SavingsGoals`, `SavingsGoalContributions`, `CoachInsightDecisions`, and `PurchaseChecks` for inspection export. Bluehour keeps Sheet code for optional export and legacy inspection, but Sheets are not the primary recovery or sync source.
+
+## Older Snapshot Completion
+
+Drive vault and Sheet recovery complete missing Savings Coach arrays as empty arrays before validation. This lets older RC snapshots remain inspectable while current v6 IndexedDB profiles persist the new stores locally and through sync.
 
 ## Stale Device Recovery
 

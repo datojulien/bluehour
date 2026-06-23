@@ -14,7 +14,7 @@ describe("sheet serialization", () => {
 
     expect(payload.Meta[0]).toEqual(["key", "value"]);
     expect(payload.Meta[2]).toEqual(["remoteRevision", 1]);
-    expect(payload.Meta[1]).toEqual(["schemaVersion", 4]);
+    expect(payload.Meta[1]).toEqual(["schemaVersion", 5]);
     expect(payload.Accounts[0]).toContain("name");
     expect(payload.Transactions.length).toBeGreaterThan(1);
   });

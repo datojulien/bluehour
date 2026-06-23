@@ -66,7 +66,8 @@ export function buildDashboardModel(snapshot: BluehourSnapshot, asOfDate: IsoDat
         budgetAllocations: snapshot.budgetAllocations,
         budgetTransfers: snapshot.budgetTransfers,
         planInstances: snapshot.planInstances,
-        extraIncomeAllocations: snapshot.extraIncomeAllocations
+        extraIncomeAllocations: snapshot.extraIncomeAllocations,
+        savingsGoalContributions: snapshot.savingsGoalContributions
       };
 
       return [
@@ -120,6 +121,7 @@ function calculateProjectedSafeToSpend(
       budgetTransfers: snapshot.budgetTransfers,
       planInstances: snapshot.planInstances,
       extraIncomeAllocations: snapshot.extraIncomeAllocations,
+      savingsGoalContributions: snapshot.savingsGoalContributions,
       includeFutureIncome: true
     });
   }
@@ -140,6 +142,7 @@ function calculateProjectedSafeToSpend(
     budgetTransfers: snapshot.budgetTransfers,
     planInstances: snapshot.planInstances,
     extraIncomeAllocations: snapshot.extraIncomeAllocations,
+    savingsGoalContributions: snapshot.savingsGoalContributions,
     includeFutureIncome: true
   });
 

@@ -3,6 +3,7 @@ import { ArrowRightLeft, Save } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { assertBudgetTransferSourceAvailable } from "../../domain/budgets/calculations";
 import { buildBudgetProgressRows, type BudgetProgressRow as DomainBudgetProgressRow } from "../../domain/budgets/budgetProgress";
+import { detectSaveDifferenceOpportunities } from "../../domain/coach/saveDifference";
 import { formatDisplayDate } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
@@ -53,6 +54,10 @@ export function BudgetsPage() {
         return { ...progress, allocation };
       });
   }, [snapshot, activeCycle, asOfDate]);
+  const saveDifferenceRows = useMemo(
+    () => (snapshot && activeCycle ? detectSaveDifferenceOpportunities(snapshot, activeCycle, asOfDate).slice(0, 3) : []),
+    [activeCycle, asOfDate, snapshot]
+  );
 
   if (loading) {
     return <div className="loading-state">Opening budgets…</div>;
@@ -181,6 +186,31 @@ export function BudgetsPage() {
           setMessage("Budget transfer saved. No account transaction was created.");
         }}
       />
+
+      {saveDifferenceRows.length > 0 ? (
+        <section className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Savings Coach</p>
+              <h2>Save-the-Difference opportunities</h2>
+            </div>
+            <a className="secondary-action" href="#/coach#difference">
+              Open Coach
+            </a>
+          </div>
+          <div className="stack-list">
+            {saveDifferenceRows.map((opportunity) => (
+              <div className="stack-row" key={opportunity.categoryId}>
+                <div>
+                  <strong>{opportunity.categoryName}</strong>
+                  <small>{opportunity.reason}</small>
+                </div>
+                <Amount value={opportunity.suggestedMoveMinor} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="dashboard-band">
         <div className="band-header">

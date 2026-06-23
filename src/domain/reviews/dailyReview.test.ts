@@ -5,7 +5,7 @@ import { createExtraIncomeAllocation } from "../income/extraIncomeAllocation";
 import { dailyReviewTasks, parseDailyReviewItems, upsertDailyReviewSession } from "./dailyReview";
 
 describe("daily review", () => {
-  it("creates deterministic tasks for due plans, imports, sync, and deferred extra income", () => {
+  it("creates deterministic tasks for savings review, imports, sync, and deferred extra income", () => {
     const snapshot = createDemoSnapshot();
     snapshot.importRowAudits = [
       {
@@ -42,6 +42,8 @@ describe("daily review", () => {
 
     expect(dailyReviewTasks(snapshot, demoAsOfDate).map((task) => task.id)).toEqual([
       "deferred-extra-income",
+      "save-the-difference",
+      "savings-coach-insights",
       "sync-pending",
       "uncertain-imports"
     ]);

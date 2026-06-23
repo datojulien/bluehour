@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-rc.3 - 2026-06-23
+
+- Added Savings Coach as a primary Coach route with Spending Leak Detector, Can I Buy This?, Savings Goals, Save-the-Difference, Subscription Optimiser, and End-of-Cycle Savings Review.
+- Added persisted `SavingsGoal`, `SavingsGoalContribution`, `CoachInsightDecision`, and `PurchaseCheck` records with runtime validation, backup/restore, Drive vault sync, optional Sheet export, and conflict handling.
+- Added pending savings-goal contributions to protected reserve calculations so safe-to-spend and projected cash flow hold those amounts until the user records or links the protected transfer.
+- Added restrained Savings Coach cues to Overview, Budgets, Review, Settings, and Subscriptions.
+- Extended subscription metadata with value rating, last reviewed date, and active/paused/archived review state.
+- Incremented IndexedDB schema to v6, demo fixture version to v6, Drive vault schema to v2, and optional Google Sheet schema to v5.
+- Added Savings Coach domain tests and updated documentation across the RC readiness set.
+
 ## 1.0.0-rc.2 - 2026-06-23
 
 - Added local-only Budget Coach guidance for first-budget onboarding, the Budgets page, Review, and a restrained dashboard shortfall cue.

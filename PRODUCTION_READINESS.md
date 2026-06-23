@@ -4,32 +4,34 @@ Last updated: 23/06/2026
 
 ## Release Candidate Status
 
-Bluehour is prepared as `1.0.0-rc.2` when the automated verification suite below passes on the release-candidate files.
+Bluehour is prepared as `1.0.0-rc.3` when the automated verification suite below passes on the release-candidate files.
 
 This is not a stable `1.0.0` release. Real Google OAuth, real Drive app-data vault sync, optional Sheet export verification, and GitHub Pages deployment remain manual release gates for stable production use.
 
-## V1 RC2 Status
+## V1 RC3 Status
 
-RC2 hardens the release-candidate track around the daily product loop:
+RC3 extends the release-candidate track with Savings Coach while preserving the RC manual stable-release gate:
 
 - Drive app-data vault remains the primary live-profile sync path; Google Sheets remain optional export/inspection only.
-- IndexedDB schema is v5, demo fixture version is v5, and optional Sheet schema is v4.
+- IndexedDB schema is v6, demo fixture version is v6, Drive vault schema is v2, and optional Sheet schema is v5.
 - Extra-income decisions are durable records and pending protected allocations reduce safe-to-spend until a protected transfer is explicitly linked.
+- Pending savings-goal contributions reduce safe-to-spend until the user records or links the protected transfer.
+- Savings Coach adds local-only spending leak detection, purchase checks, savings goals, Save-the-Difference, subscription value review, and cycle savings review.
 - Category taxonomy reconciliation is non-destructive and the category manager supports create, rename, archive, restore, reorder, and validated mode/group changes.
 - Overview and Budgets share exact budget-progress math, including future reserved plans and overspend states.
-- Daily Review, Recent Activity, cycle comparison, and subscription management are backed by domain calculations and RC2 browser coverage.
+- Daily Review, Recent Activity, cycle comparison, Savings Coach, and subscription management are backed by domain calculations and browser coverage.
 
 ## Verified Automated Gate
 
-These commands were run locally from a clean dependency install during the RC2 pass:
+These commands were run locally from a clean dependency install during the RC3 pass:
 
 - `npm ci`: passed, 262 packages installed, 0 vulnerabilities.
 - `npm run lint`: passed.
-- `npm test`: passed, 35 test files and 180 tests.
-- `npm run test:coverage`: passed, 74.71% statements, 65.6% branches, 80.9% functions, 74.2% lines.
+- `npm test`: passed, 36 test files and 188 tests.
+- `npm run test:coverage`: passed, 75.01% statements, 64.87% branches, 80.89% functions, 74.51% lines.
 - `npm run typecheck`: passed.
-- `npm run build`: passed, no Vite main-chunk warning; the main index chunk was 399.38 kB.
-- `npm run test:e2e`: passed, 64 browser tests and 80 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
+- `npm run build`: passed, no Vite main-chunk warning; the main index chunk was 404.00 kB (gzip 121.02 kB).
+- `npm run test:e2e`: passed, 65 browser tests and 82 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
 
 ## Completed Across The RC Track
 
@@ -54,8 +56,8 @@ These commands were run locally from a clean dependency install during the RC2 p
 - [x] Added same-file import warning and deliberate re-import confirmation.
 - [x] Changed rollback to archive only transactions created by that import batch while preserving linked pre-existing transactions and audit history.
 - [x] Added `importRowAudits` to IndexedDB, validated snapshots, encrypted backup/restore, optional Google Sheet serialisation, and sync conflict data.
-- [x] Incremented IndexedDB schema to v5 with non-destructive upgrade paths.
-- [x] Incremented optional Google Sheet schema to v4 while keeping older mocked migration sources readable for inspection/export work.
+- [x] Incremented IndexedDB schema to v6 with non-destructive upgrade paths.
+- [x] Incremented Drive vault schema to v2 and optional Google Sheet schema to v5 while keeping older mocked migration sources readable for inspection/export work.
 - [x] Preserved staged Google remote writes with inactive-slot writes, full read-back, runtime validation, round-trip comparison, and commit metadata written last.
 - [x] Added mocked Google schema round-trip and migration-source tests for the audit and extra-income models.
 - [x] Added Google Sign-In profile metadata with Drive app-data scope and no persisted OAuth tokens.
@@ -65,6 +67,7 @@ These commands were run locally from a clean dependency install during the RC2 p
 - [x] Refactored the sync planner around provider-neutral remote snapshots while keeping Google Sheets as optional export/inspection.
 - [x] Added mocked Drive vault tests for staged writes, unsupported-schema recovery, profile restore, and browser login flows.
 - [x] Added exact budget-progress domain calculations shared by Overview and Budgets.
+- [x] Added Savings Coach domain engines, persisted goal/contribution/insight/purchase records, and explicit user-action flows.
 - [x] Added category taxonomy reconciliation and category manager workflows.
 - [x] Added extra-income allocation, Daily Review, Recent Activity, cycle comparison, and subscription hardening.
 - [x] Added WebKit critical-flow coverage while retaining Chromium coverage.

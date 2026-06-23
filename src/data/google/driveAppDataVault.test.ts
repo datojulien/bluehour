@@ -47,7 +47,7 @@ describe("Drive app-data vault", () => {
         "manifest-file",
         {
           kind: "bluehour-drive-vault-manifest",
-          schemaVersion: 1,
+          schemaVersion: 2,
           remoteRevision: 4,
           activeSlot: "A",
           files: {

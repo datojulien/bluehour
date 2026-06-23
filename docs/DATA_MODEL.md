@@ -13,7 +13,7 @@ lastModifiedByClientId?
 
 ## IndexedDB Schema
 
-Current IndexedDB schema version: `5`.
+Current IndexedDB schema version: `6`.
 
 Profile databases contain:
 
@@ -30,6 +30,10 @@ Profile databases contain:
 - `planInstances`
 - `subscriptions`
 - `extraIncomeAllocations`
+- `savingsGoals`
+- `savingsGoalContributions`
+- `coachInsightDecisions`
+- `purchaseChecks`
 - `categorisationRules`
 - `importProfiles`
 - `importBatches`
@@ -63,11 +67,11 @@ The device ID is generated with `crypto.randomUUID()`. It is not derived from ha
 
 ## Demo Fixture Version
 
-Current demo fixture version: `v1-local-demo-v5`.
+Current demo fixture version: `v1-local-demo-v6`.
 
 A fixture version change does not clear mutable profile data. Demo reset is explicit and affects only `bluehour-profile-demo`.
 
-Schema v5 adds `extraIncomeAllocations` and performs a non-destructive starter-category taxonomy reconciliation. Existing live categories are repaired or added where needed, archived categories stay archived, and changed live records enter the outbox. A blank live profile remains locally saved without generating category sync noise.
+Schema v6 adds Savings Coach stores for goals, goal contributions, insight decisions, and purchase checks. Schema v5 added `extraIncomeAllocations` and performs a non-destructive starter-category taxonomy reconciliation. Existing live categories are repaired or added where needed, archived categories stay archived, and changed live records enter the outbox. A blank live profile remains locally saved without generating category sync noise.
 
 ## Backup Schema
 
@@ -140,9 +144,72 @@ linkedTransferTransactionId?
 
 Pending protected allocations reduce safe-to-spend for the matching salary cycle until the user records and confirms the protected transfer link. Deferred allocations appear in Daily Review.
 
+## Savings Coach
+
+Savings Coach adds four synced stores:
+
+```text
+savingsGoals
+  name
+  targetMinor
+  currentManualMinor?
+  deadline?
+  priority: low | normal | high
+  linkedAccountId?
+  linkedCategoryId?
+  status: active | paused | completed
+  notes?
+
+savingsGoalContributions
+  savingsGoalId
+  amountMinor
+  occurredOn
+  source: manual | protected_transfer | save_difference | extra_income | cycle_close
+  status: manual | pending_transfer | completed
+  linkedTransactionId?
+  linkedBudgetCycleId?
+  note?
+
+coachInsightDecisions
+  insightFingerprint
+  decision: dismissed | accepted | snoozed | converted_to_goal | converted_to_plan
+  decidedAt
+  snoozedUntil?
+  linkedSavingsGoalId?
+  linkedPlanInstanceId?
+
+purchaseChecks
+  checkedOn
+  label
+  categoryId
+  amountMinor
+  result: safe | caution | not_recommended
+  safeToSpendBeforeMinor
+  safeToSpendAfterMinor
+  decision: bought | waited | planned | dismissed
+  linkedTransactionId?
+  linkedPlanInstanceId?
+```
+
+Pending savings-goal contributions reduce safe-to-spend as protected savings until the user records or links the actual protected transfer. Insight decisions archive rather than delete by default, so dismissed and snoozed recommendations can be reset explicitly from Settings.
+
+Savings Coach preferences live inside the existing `preferences` setting as typed `savingsCoach` data:
+
+```text
+enabled
+insightSensitivity: gentle | normal | strict
+smallPurchaseThresholdMinor
+smallPurchaseWindowDays
+merchantWatchlist[]
+categoryReductionTargets[]
+defaultGoalPriority
+saveDifferenceDefault
+snoozeDays
+```
+
 ## Subscriptions
 
-Subscriptions keep provider metadata, billing cadence, next payment date, optional annual renewal date, optional cancellation deadline, essential flag, notes, and optional price-history JSON. Monthly equivalents are derived with documented integer rounding and are not written back as stored money.
+Subscriptions keep provider metadata, billing cadence, next payment date, optional annual renewal date, optional cancellation deadline, essential flag, value rating, last reviewed date, review status, notes, and optional price-history JSON. Monthly equivalents are derived with documented integer rounding and are not written back as stored money.
 
 ## Profile Manifest
 

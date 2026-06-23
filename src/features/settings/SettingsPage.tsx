@@ -36,7 +36,12 @@ import { planRemoteSnapshotSync } from "../../data/sync/remoteSync";
 import { toCsv } from "../../domain/imports/csv";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import type { Account, AppSettings, BalanceSnapshot, BluehourSnapshot, Category, ConflictRecord, PlanInstance, RecurringRule, SyncState } from "../../domain/types";
+import {
+  readSavingsCoachPreferences,
+  savingsCoachPreferenceRecord,
+  type SavingsCoachPreferences
+} from "../../domain/coach/preferences";
+import type { Account, AppSettings, BalanceSnapshot, BluehourSnapshot, Category, CoachInsightDecision, ConflictRecord, PlanInstance, RecurringRule, SyncState } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { readProfileManifest } from "../../domain/profileManifest";
 
@@ -113,6 +118,27 @@ export function SettingsPage() {
         onSave={async (mutations) => {
           await saveRecords(mutations, "category management");
           setMessage("Category changes saved.");
+        }}
+      />
+
+      <SavingsCoachSettingsPanel
+        settings={snapshot.settings}
+        categories={snapshot.categories}
+        decisions={snapshot.coachInsightDecisions}
+        onSave={async (preferences) => {
+          await saveRecords([{ storeName: "settings", record: savingsCoachPreferenceRecord(snapshot.settings, preferences) }], "Savings Coach preferences");
+          setMessage("Savings Coach preferences saved.");
+        }}
+        onResetDecisions={async (decisions) => {
+          if (decisions.length === 0) {
+            setMessage("No Savings Coach insight decisions to reset.");
+            return;
+          }
+          await saveRecords(
+            decisions.map((record) => ({ storeName: "coachInsightDecisions" as const, record })),
+            "Savings Coach insight reset"
+          );
+          setMessage("Savings Coach insight decisions reset.");
         }}
       />
 
@@ -418,6 +444,168 @@ function AccountForm({ date, onSave }: { date: string; onSave: (records: { accou
       </form>
     </section>
   );
+}
+
+function SavingsCoachSettingsPanel({
+  settings,
+  categories,
+  decisions,
+  onSave,
+  onResetDecisions
+}: {
+  settings: AppSettings[];
+  categories: Category[];
+  decisions: CoachInsightDecision[];
+  onSave: (preferences: SavingsCoachPreferences) => Promise<void>;
+  onResetDecisions: (decisions: CoachInsightDecision[]) => Promise<void>;
+}) {
+  const preferences = readSavingsCoachPreferences(settings);
+  const [enabled, setEnabled] = useState(preferences.enabled);
+  const [insightSensitivity, setInsightSensitivity] = useState(preferences.insightSensitivity);
+  const [smallPurchaseThreshold, setSmallPurchaseThreshold] = useState((preferences.smallPurchaseThresholdMinor / 100).toFixed(2));
+  const [smallPurchaseWindowDays, setSmallPurchaseWindowDays] = useState(String(preferences.smallPurchaseWindowDays));
+  const [merchantWatchlist, setMerchantWatchlist] = useState(preferences.merchantWatchlist.join(", "));
+  const [defaultGoalPriority, setDefaultGoalPriority] = useState(preferences.defaultGoalPriority);
+  const [saveDifferenceDefault, setSaveDifferenceDefault] = useState(preferences.saveDifferenceDefault);
+  const [snoozeDays, setSnoozeDays] = useState(String(preferences.snoozeDays));
+  const [categoryTargets, setCategoryTargets] = useState<Record<string, string>>(
+    Object.fromEntries(preferences.categoryReductionTargets.map((target) => [target.categoryId, String(target.targetReductionBasisPoints)]))
+  );
+  const [error, setError] = useState<string | null>(null);
+  const targetCategories = categories
+    .filter((category) => isActive(category) && category.active && category.nature === "discretionary")
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await onSave({
+        enabled,
+        insightSensitivity,
+        smallPurchaseThresholdMinor: parseMoneyInput(smallPurchaseThreshold),
+        smallPurchaseWindowDays: positiveInteger(smallPurchaseWindowDays, "small-purchase window"),
+        merchantWatchlist: merchantWatchlist
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .slice(0, 20),
+        categoryReductionTargets: Object.entries(categoryTargets)
+          .map(([categoryId, value]) => ({
+            categoryId,
+            targetReductionBasisPoints: Number.parseInt(value, 10)
+          }))
+          .filter((target) => target.targetReductionBasisPoints > 0),
+        defaultGoalPriority,
+        saveDifferenceDefault,
+        snoozeDays: positiveInteger(snoozeDays, "snooze days")
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save Savings Coach preferences");
+    }
+  }
+
+  async function resetDecisions() {
+    const now = new Date().toISOString();
+    await onResetDecisions(decisions.filter(isActive).map((decision) => ({ ...touchRecord(decision), archivedAt: now })));
+  }
+
+  return (
+    <section className="dashboard-band" id="savings-coach">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Savings Coach</p>
+          <h2>Preferences</h2>
+        </div>
+        <button className="secondary-action" type="button" onClick={() => void resetDecisions()}>
+          Reset insights
+        </button>
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <label className="checkbox-label">
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+          Enabled
+        </label>
+        <label>
+          Sensitivity
+          <select value={insightSensitivity} onChange={(event) => setInsightSensitivity(event.target.value as SavingsCoachPreferences["insightSensitivity"])}>
+            <option value="gentle">gentle</option>
+            <option value="normal">normal</option>
+            <option value="strict">strict</option>
+          </select>
+        </label>
+        <label>
+          Small purchase threshold
+          <input value={smallPurchaseThreshold} onChange={(event) => setSmallPurchaseThreshold(event.target.value)} inputMode="decimal" />
+        </label>
+        <label>
+          Watch window days
+          <input value={smallPurchaseWindowDays} onChange={(event) => setSmallPurchaseWindowDays(event.target.value)} inputMode="numeric" />
+        </label>
+        <label>
+          Goal priority
+          <select value={defaultGoalPriority} onChange={(event) => setDefaultGoalPriority(event.target.value as SavingsCoachPreferences["defaultGoalPriority"])}>
+            <option value="low">low</option>
+            <option value="normal">normal</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label>
+          Save difference default
+          <select value={saveDifferenceDefault} onChange={(event) => setSaveDifferenceDefault(event.target.value as SavingsCoachPreferences["saveDifferenceDefault"])}>
+            <option value="ask">ask</option>
+            <option value="move_half">move half</option>
+            <option value="move_all">move all</option>
+            <option value="keep_available">keep available</option>
+          </select>
+        </label>
+        <label>
+          Snooze days
+          <input value={snoozeDays} onChange={(event) => setSnoozeDays(event.target.value)} inputMode="numeric" />
+        </label>
+        <label className="span-3">
+          Merchant watchlist
+          <input value={merchantWatchlist} onChange={(event) => setMerchantWatchlist(event.target.value)} />
+        </label>
+        <fieldset className="segmented-field span-3">
+          <legend>Category reduction targets</legend>
+          {targetCategories.map((category) => (
+            <label key={category.id}>
+              {category.name}
+              <select
+                value={categoryTargets[category.id] ?? "0"}
+                onChange={(event) => setCategoryTargets((current) => ({ ...current, [category.id]: event.target.value }))}
+              >
+                <option value="0">off</option>
+                <option value="500">5%</option>
+                <option value="1000">10%</option>
+                <option value="1500">15%</option>
+                <option value="2000">20%</option>
+              </select>
+            </label>
+          ))}
+        </fieldset>
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="primary-action" type="submit">
+            <Save size={16} aria-hidden="true" />
+            Save preferences
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function positiveInteger(value: string, label: string): number {
+  if (!/^\d+$/.test(value.trim())) {
+    throw new Error(`${label} must be a positive whole number.`);
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (parsed <= 0) {
+    throw new Error(`${label} must be greater than zero.`);
+  }
+  return parsed;
 }
 
 function CategoryManager({

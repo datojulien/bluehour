@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, CalendarClock, ChevronRight, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
+import { AlertTriangle, CalendarClock, ChevronRight, PiggyBank, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { buildActivityFeed } from "../../domain/activity/activityFeed";
 import { recommendBudget } from "../../domain/budgets/budgetCoach";
+import { readSavingsCoachPreferences } from "../../domain/coach/preferences";
+import { detectSpendingLeaks } from "../../domain/coach/spendingLeakDetector";
 import { compareActiveCycleToPrevious } from "../../domain/reviews/cycleComparison";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
 import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
@@ -45,6 +47,20 @@ export function OverviewPage() {
       );
     } catch {
       return null;
+    }
+  }, [asOfDate, snapshot]);
+  const savingsNudges = useMemo(() => {
+    if (!snapshot) {
+      return [];
+    }
+    const activeCycle = snapshot.budgetCycles.find((cycle) => cycle.status === "open");
+    if (!activeCycle) {
+      return [];
+    }
+    try {
+      return detectSpendingLeaks(snapshot, activeCycle, asOfDate, readSavingsCoachPreferences(snapshot.settings)).slice(0, 2);
+    } catch {
+      return [];
     }
   }, [asOfDate, snapshot]);
 
@@ -157,6 +173,18 @@ export function OverviewPage() {
           </span>
           <a className="secondary-action" href="#/budgets">
             Review with Budget Coach
+          </a>
+        </section>
+      ) : null}
+
+      {savingsNudges.length > 0 ? (
+        <section className="alert-band">
+          <PiggyBankIcon />
+          <span>
+            Savings Coach: {savingsNudges.map((nudge) => nudge.title).join(" · ")}
+          </span>
+          <a className="secondary-action" href="#/coach">
+            Open Coach
           </a>
         </section>
       ) : null}
@@ -313,6 +341,10 @@ export function OverviewPage() {
       <BreakdownDrawer result={result} cashFlow={cashFlow} open={breakdownOpen} onClose={() => setBreakdownOpen(false)} />
     </>
   );
+}
+
+function PiggyBankIcon() {
+  return <PiggyBank size={18} aria-hidden="true" />;
 }
 
 function buildDashboardAlerts(
