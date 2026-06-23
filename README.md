@@ -8,6 +8,10 @@ Bluehour is a React + TypeScript personal cash-flow and salary-cycle budgeting a
 
 The app is prepared as a release-candidate track, not stable `1.0.0`. See `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md` for the exact verified status and the manual Google release gate.
 
+Current release-candidate target: `1.0.0-rc.2`.
+
+RC2 adds category taxonomy reconciliation, shared budget-progress math, extra-income allocation and protected-transfer linking, Daily Review generation, real Recent Activity and cycle comparison summaries, richer subscription management, IndexedDB schema v5, and optional Google Sheet schema v4 export.
+
 ## Demo And Live Profiles
 
 First launch shows three choices:
@@ -57,6 +61,7 @@ Restart `npm run dev` after changing `.env`; Vite reads environment variables at
 ## Checks
 
 ```bash
+npm ci
 npm run lint
 npm test
 npm run test:coverage
@@ -157,7 +162,7 @@ The vault uses three app-data files:
 
 Bluehour writes the inactive slot, reads it back for runtime-schema validation and round-trip comparison, then updates `bluehour-manifest.json` last. The manifest stores schema version, remote revision, active slot, profile ID, app version, commit timestamp, and last writer device ID.
 
-Google Sheets remain available from Settings as optional manual export/inspection. Sheets are not used for login, onboarding, or daily sync.
+Google Sheets remain available from Settings as optional manual export/inspection using Sheet schema v4. Sheets are not used for login, onboarding, or daily sync.
 
 Cross-device recovery uses a typed `profileManifest` settings record synced with the live profile. It stores a random profile UUID, lifecycle (`setup`, `ready_for_salary`, `live`, or `read_only_recovery`), current onboarding checkpoint where relevant, MYR currency, app version metadata, timestamps, and optional last-writing local device ID. It does not store Google email, computer name, account numbers, or hardware identifiers.
 
@@ -189,9 +194,21 @@ The service worker uses network-first navigation and versioned static-asset cach
 
 ## Forecasting And Imports
 
-Bluehour stores and calculates all MYR values as integer sen. Salary-day projections are segmented so the current cycle ends the day before payday and the virtual future cycle begins on payday. The cash-flow timeline includes confirmed income, projected salary, plan-reserved payments, subscriptions, dated plans, protected contribution assumptions, and deterministic essential-envelope distributions.
+Bluehour stores and calculates all MYR values as integer sen. Salary-day projections are segmented so the current cycle ends the day before payday and the virtual future cycle begins on payday. The cash-flow timeline includes confirmed income, projected salary, plan-reserved payments, subscriptions, dated plans, protected contribution assumptions, pending protected extra-income allocations, and deterministic essential-envelope distributions.
+
+Budget progress is calculated once in the domain layer and shared by Overview and Budgets. It shows allocated, spent, future reserved, remaining, and overspend/no-allocation states without hard-coded progress fallbacks.
+
+Extra non-salary income prompts the user to make it available, protect it, split it, or defer the decision. Protected extra income reduces safe-to-spend until the matching protected transfer is recorded and explicitly linked.
 
 CSV imports save a durable audit row for every normalized row. Strong duplicates link to existing transactions without creating new ledger records; uncertain matches persist ranked candidate transaction IDs until the user links, creates, or ignores the row.
+
+## Review, Categories, And Subscriptions
+
+Daily Review derives tasks from uncategorised splits, due plans, uncertain imports, deferred extra income, sync issues, and projected shortfalls.
+
+The category manager supports create, rename, archive, restore, reorder, and validated group/nature/reservation-mode changes. System categories are protected from archival.
+
+Subscriptions show actual amount, monthly equivalent, annual total, cancellation deadlines, renewal alerts, price-change alerts, editable metadata, and archive/cancel controls that preserve historical records.
 
 ## Budget Coach
 

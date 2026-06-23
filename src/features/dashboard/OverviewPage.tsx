@@ -2,14 +2,16 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, CalendarClock, ChevronRight, ShieldCheck, TrendingDown, Wallet } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
+import { buildActivityFeed } from "../../domain/activity/activityFeed";
 import { recommendBudget } from "../../domain/budgets/budgetCoach";
+import { compareActiveCycleToPrevious } from "../../domain/reviews/cycleComparison";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
 import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
 import type { SafeToSpendPeriod, SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
 import { isActive, type BluehourSnapshot, type IsoDate } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 import { BreakdownDrawer } from "./BreakdownDrawer";
-import { buildBudgetRows } from "./budgetRows";
+import { buildBudgetRows, type DashboardBudgetRow } from "./budgetRows";
 import { buildDailyTimeline, buildDashboardModel } from "./dashboardModel";
 import { buildBudgetCoachInputForCycle, readBudgetCoachPreferences } from "../budgets/budgetCoachSettings";
 
@@ -64,12 +66,14 @@ export function OverviewPage() {
   const projected = selected.projected;
   const cashFlow = selected.cashFlow;
   const cycle = model.activeCycle;
-  const budgetRows = buildBudgetRows(snapshot, result);
+  const budgetRows = buildBudgetRows(snapshot, cycle, asOfDate);
 
   const upcoming = projected.breakdown.committedPlans.slice(0, 4);
   const timeline = buildDailyTimeline(model.periods.next30Days.cashFlow, 30);
   const alerts = buildDashboardAlerts(snapshot, result, cashFlow, budgetRows, asOfDate);
-  const whatChanged = buildWhatChanged(snapshot, result, budgetRows);
+  const comparison = compareActiveCycleToPrevious(snapshot, cycle, asOfDate);
+  const whatChanged = comparison.items.slice(0, 5);
+  const activity = buildActivityFeed(snapshot, 8);
 
   return (
     <>
@@ -188,22 +192,24 @@ export function OverviewPage() {
           </div>
           <div className="budget-list">
             {budgetRows.map((row) => (
-              <div className="budget-row" key={row.id}>
+              <div className="budget-row" key={row.categoryId}>
                 <div>
-                  <strong>{row.name}</strong>
+                  <strong>{row.categoryName}</strong>
                   <span>
-                    <Amount value={row.remaining} /> remaining
+                    Allocated <Amount value={row.allocationMinor} /> · Spent <Amount value={row.spentMinor} /> · Reserved{" "}
+                    <Amount value={row.reservedFuturePlansMinor} /> · Remaining <Amount value={row.remainingAfterFuturePlansMinor} />
                   </span>
+                  <small>{stateLabel(row.state)}</small>
                 </div>
                 <div
                   className="progress-track"
                   role="progressbar"
-                  aria-label={`${row.name} ${row.percentage}% used`}
+                  aria-label={`${row.categoryName} ${row.percentageUsedOrReserved}% used or reserved`}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={row.percentage}
+                  aria-valuenow={Math.min(100, row.percentageUsedOrReserved)}
                 >
-                  <span style={{ width: `${row.percentage}%` }} />
+                  <span style={{ width: `${Math.min(100, row.percentageUsedOrReserved)}%` }} />
                 </div>
               </div>
             ))}
@@ -259,12 +265,48 @@ export function OverviewPage() {
             </div>
           </div>
           <div className="stack-list">
-            {whatChanged.map((item) => (
-              <div className="stack-row" key={item}>
-                <span>{item}</span>
+            {whatChanged.length > 0 ? (
+              whatChanged.map((item) => (
+                <div className={`stack-row alert-${item.level}`} key={item.id}>
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>
+                      {item.deltaMinor !== undefined ? <Amount value={item.deltaMinor} /> : null} {item.explanation}
+                    </small>
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="stack-row">
+                <span>{comparison.unavailableReason ?? "Cycle comparison will be available after another completed cycle."}</span>
               </div>
-            ))}
+            )}
+            <a className="secondary-action" href="#/review">
+              Open Review
+            </a>
           </div>
+        </div>
+      </section>
+
+      <section className="dashboard-band">
+        <div className="band-header">
+          <div>
+            <p className="eyebrow">Recent Activity</p>
+            <h2>Real profile events</h2>
+          </div>
+        </div>
+        <div className="stack-list">
+          {activity.map((item) => (
+            <a className="stack-row activity-row" href={`#${item.route ?? "/"}`} key={item.id}>
+              <span>
+                <strong>{item.label}</strong>
+                <small>
+                  {formatDisplayDate(item.localDate)} · {item.detail ?? item.type.replaceAll("_", " ")}
+                </small>
+              </span>
+              {item.amountMinor !== undefined ? <Amount value={item.amountMinor} /> : null}
+            </a>
+          ))}
         </div>
       </section>
 
@@ -277,7 +319,7 @@ function buildDashboardAlerts(
   snapshot: BluehourSnapshot,
   result: SafeToSpendResult,
   cashFlow: CashFlowProjection,
-  budgetRows: Array<{ name: string; percentage: number; remaining: number }>,
+  budgetRows: DashboardBudgetRow[],
   asOfDate: IsoDate
 ): Array<{ label: string; detail: string; level: "info" | "warning" | "danger" }> {
   const alerts: Array<{ label: string; detail: string; level: "info" | "warning" | "danger" }> = [];
@@ -289,8 +331,8 @@ function buildDashboardAlerts(
   );
   const uncategorised = snapshot.transactionSplits.filter((split) => isActive(split) && split.categoryId === "cat-uncategorised").length;
   const waitingToSync = snapshot.outboxOperations.length;
-  const overspent = budgetRows.filter((row) => row.remaining < 0);
-  const nearLimit = budgetRows.filter((row) => row.percentage >= 80 && row.remaining >= 0);
+  const overspent = budgetRows.filter((row) => row.state === "overspent");
+  const nearLimit = budgetRows.filter((row) => row.state === "near_limit" || row.state === "fully_reserved");
 
   if (result.safeToSpendMinor === 0) {
     alerts.push({ label: "Safe to spend is RM0.00", detail: "Review discretionary plans and category budgets.", level: "danger" });
@@ -309,10 +351,10 @@ function buildDashboardAlerts(
     alerts.push({ label: "Annual renewal within 30 days", detail: `${renewalsSoon.length} subscription renewal${renewalsSoon.length === 1 ? "" : "s"} approaching.`, level: "warning" });
   }
   if (overspent.length > 0) {
-    alerts.push({ label: "Category overspent", detail: overspent.map((row) => row.name).join(", "), level: "danger" });
+    alerts.push({ label: "Category overspent", detail: overspent.map((row) => row.categoryName).join(", "), level: "danger" });
   }
   if (nearLimit.length > 0) {
-    alerts.push({ label: "Category near limit", detail: nearLimit.map((row) => row.name).join(", "), level: "warning" });
+    alerts.push({ label: "Category near limit", detail: nearLimit.map((row) => row.categoryName).join(", "), level: "warning" });
   }
   if (uncategorised > 0) {
     alerts.push({ label: "Uncategorised transactions", detail: `${uncategorised} split${uncategorised === 1 ? "" : "s"} need review.`, level: "warning" });
@@ -324,29 +366,8 @@ function buildDashboardAlerts(
   return alerts.length > 0 ? alerts : [{ label: "No urgent alerts", detail: "The current profile has no urgent forecast warnings.", level: "info" }];
 }
 
-function buildWhatChanged(
-  snapshot: BluehourSnapshot,
-  result: SafeToSpendResult,
-  budgetRows: Array<{ name: string; percentage: number; remaining: number }>
-): string[] {
-  const notes: string[] = [];
-  const dining = budgetRows.find((row) => row.name === "Dining Out");
-  const subscriptionCount = snapshot.subscriptions.filter(isActive).length;
-
-  if (dining) {
-    notes.push(`Dining Out is ${dining.percentage}% used for this cycle.`);
-  }
-  if (subscriptionCount > 0) {
-    notes.push(`${subscriptionCount} subscription${subscriptionCount === 1 ? "" : "s"} feed the forward forecast.`);
-  }
-  if (result.protectedReserveMinor === 0) {
-    notes.push("Protected contributions are complete for this cycle.");
-  }
-  if (result.breakdown.discretionaryReservedPlansMinor > 0) {
-    notes.push("Future discretionary plans are already reserved in safe-to-spend.");
-  }
-
-  return notes.length > 0 ? notes : ["Cycle comparison will be available after another completed cycle."];
+function stateLabel(state: DashboardBudgetRow["state"]): string {
+  return state.replace("_", " ");
 }
 
 function MetricCard({

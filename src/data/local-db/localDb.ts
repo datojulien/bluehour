@@ -10,6 +10,7 @@ import type {
   Category,
   ConflictRecord,
   AppSettings,
+  ExtraIncomeAllocation,
   ImportBatch,
   ImportProfile,
   ImportRowAudit,
@@ -25,6 +26,7 @@ import type {
   TransactionSplit
 } from "../../domain/types";
 import { createDemoSnapshot } from "../../test/fixtures/demoData";
+import { reconcileStarterCategories } from "../../domain/categories/categoryManagement";
 import { createProfileManifest, profileManifestSettingRecord } from "../../domain/profileManifest";
 import {
   accountSchema,
@@ -36,6 +38,7 @@ import {
   categorySchema,
   conflictRecordSchema,
   appSettingsSchema,
+  extraIncomeAllocationSchema,
   importBatchSchema,
   importProfileSchema,
   importRowAuditSchema,
@@ -59,9 +62,10 @@ export const PROFILE_DB_NAMES: Record<ProfileId, string> = {
   live: "bluehour-profile-live"
 };
 
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 export const INDEXED_DB_SCHEMA_VERSION = DB_VERSION;
-export const DEMO_FIXTURE_VERSION = "v1-local-demo-v4";
+export const DEMO_FIXTURE_VERSION = "v1-local-demo-v5";
+const CATEGORY_TAXONOMY_MIGRATION_VERSION = "v1-category-taxonomy-rc2";
 
 interface LocalMeta {
   key: string;
@@ -81,6 +85,7 @@ interface BluehourDB extends DBSchema {
   recurringRules: { key: string; value: RecurringRule };
   planInstances: { key: string; value: PlanInstance };
   subscriptions: { key: string; value: Subscription };
+  extraIncomeAllocations: { key: string; value: ExtraIncomeAllocation };
   categorisationRules: { key: string; value: CategorisationRule };
   importProfiles: { key: string; value: ImportProfile };
   importBatches: { key: string; value: ImportBatch };
@@ -107,6 +112,7 @@ type DomainStoreName =
   | "recurringRules"
   | "planInstances"
   | "subscriptions"
+  | "extraIncomeAllocations"
   | "categorisationRules"
   | "importProfiles"
   | "importBatches"
@@ -128,6 +134,7 @@ const DOMAIN_STORES = [
   "recurringRules",
   "planInstances",
   "subscriptions",
+  "extraIncomeAllocations",
   "categorisationRules",
   "importProfiles",
   "importBatches",
@@ -203,6 +210,7 @@ export async function seedDemoIfNeeded(): Promise<void> {
   await putAll(tx.objectStore("recurringRules"), snapshot.recurringRules);
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
+  await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
@@ -242,6 +250,7 @@ export async function resetDemoProfile(): Promise<void> {
   await putAll(tx.objectStore("recurringRules"), snapshot.recurringRules);
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
+  await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);
@@ -339,6 +348,8 @@ export async function loadProfileSnapshot(profileId: ProfileId): Promise<Bluehou
     await initializeLiveProfile();
   }
 
+  await migrateCategoryTaxonomyIfNeeded(profileId);
+
   const db = await openBluehourDb(profileId);
   const snapshot: BluehourSnapshot = {
     accounts: await db.getAll("accounts"),
@@ -353,6 +364,7 @@ export async function loadProfileSnapshot(profileId: ProfileId): Promise<Bluehou
     recurringRules: await db.getAll("recurringRules"),
     planInstances: await db.getAll("planInstances"),
     subscriptions: await db.getAll("subscriptions"),
+    extraIncomeAllocations: await db.getAll("extraIncomeAllocations"),
     categorisationRules: await db.getAll("categorisationRules"),
     importProfiles: await db.getAll("importProfiles"),
     importBatches: await db.getAll("importBatches"),
@@ -368,6 +380,65 @@ export async function loadProfileSnapshot(profileId: ProfileId): Promise<Bluehou
   validateSnapshot(snapshot);
   db.close();
   return snapshot;
+}
+
+async function migrateCategoryTaxonomyIfNeeded(profileId: ProfileId): Promise<void> {
+  const db = await openBluehourDb(profileId);
+  const currentVersion = await db.get("meta", "categoryTaxonomyMigrationVersion");
+  const categories = await db.getAll("categories");
+  const now = new Date().toISOString();
+
+  if (categories.length === 0) {
+    if (currentVersion?.value !== CATEGORY_TAXONOMY_MIGRATION_VERSION) {
+      const tx = db.transaction("meta", "readwrite");
+      await tx.objectStore("meta").put({ key: "categoryTaxonomyMigrationVersion", value: CATEGORY_TAXONOMY_MIGRATION_VERSION });
+      await tx.done;
+    }
+    db.close();
+    return;
+  }
+
+  const reconciled = reconcileStarterCategories(categories, now);
+
+  if (reconciled.addedIds.length === 0 && reconciled.updatedIds.length === 0) {
+    if (currentVersion?.value !== CATEGORY_TAXONOMY_MIGRATION_VERSION) {
+      const tx = db.transaction("meta", "readwrite");
+      await tx.objectStore("meta").put({ key: "categoryTaxonomyMigrationVersion", value: CATEGORY_TAXONOMY_MIGRATION_VERSION });
+      await tx.done;
+    }
+    db.close();
+    return;
+  }
+
+  const changedIds = new Set([...reconciled.addedIds, ...reconciled.updatedIds]);
+  const tx = db.transaction(["categories", "outboxOperations", "syncState", "meta"], "readwrite");
+  const syncState = await tx.objectStore("syncState").get("google");
+  for (const category of reconciled.categories.filter((candidate) => changedIds.has(candidate.id))) {
+    await tx.objectStore("categories").put(category);
+    if (profileId === "live") {
+      await tx.objectStore("outboxOperations").put({
+        id: `outbox-${crypto.randomUUID()}`,
+        tableName: "categories",
+        recordId: category.id,
+        operation: "put",
+        payloadJson: JSON.stringify(category),
+        createdAt: now,
+        attempts: 0
+      } satisfies OutboxOperation);
+    }
+  }
+  await tx.objectStore("meta").put({ key: "categoryTaxonomyMigrationVersion", value: CATEGORY_TAXONOMY_MIGRATION_VERSION });
+  await tx.objectStore("syncState").put({
+    ...syncState,
+    key: "google",
+    status: profileId === "demo" ? "demo" : "waiting_to_sync",
+    message:
+      profileId === "demo"
+        ? "Demo category taxonomy updated locally. Google sync is disabled."
+        : "Category taxonomy migration saved locally and waiting to sync."
+  } satisfies SyncState);
+  await tx.done;
+  db.close();
 }
 
 export async function loadDemoSnapshot(): Promise<BluehourSnapshot> {
@@ -391,6 +462,7 @@ export function validateSnapshot(snapshot: BluehourSnapshot): void {
   snapshot.recurringRules.forEach((record) => recurringRuleSchema.parse(record));
   snapshot.planInstances.forEach((record) => planInstanceSchema.parse(record));
   snapshot.subscriptions.forEach((record) => subscriptionSchema.parse(record));
+  snapshot.extraIncomeAllocations.forEach((record) => extraIncomeAllocationSchema.parse(record));
   snapshot.categorisationRules.forEach((record) => categorisationRuleSchema.parse(record));
   snapshot.importProfiles.forEach((record) => importProfileSchema.parse(record));
   snapshot.importBatches.forEach((record) => importBatchSchema.parse(record));
@@ -424,6 +496,7 @@ export async function replaceProfileSnapshot(profileId: ProfileId, snapshot: Blu
   await putAll(tx.objectStore("recurringRules"), snapshot.recurringRules);
   await putAll(tx.objectStore("planInstances"), snapshot.planInstances);
   await putAll(tx.objectStore("subscriptions"), snapshot.subscriptions);
+  await putAll(tx.objectStore("extraIncomeAllocations"), snapshot.extraIncomeAllocations);
   await putAll(tx.objectStore("categorisationRules"), snapshot.categorisationRules);
   await putAll(tx.objectStore("importProfiles"), snapshot.importProfiles);
   await putAll(tx.objectStore("importBatches"), snapshot.importBatches);

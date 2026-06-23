@@ -2,6 +2,7 @@ import { calculateAccountBalances, calculateNetSpendableBalance } from "../accou
 import { calculateCategoryAllocation, calculateRemainingAllocation } from "../budgets/calculations";
 import { addDays, compareIsoDate, daysBetweenInclusive, isWithinInclusive } from "../dates";
 import { clampNonNegative, percentageOfMinor } from "../money";
+import { pendingProtectedExtraIncomeMinor } from "../income/extraIncomeAllocation";
 import { calculateCategoryActuals } from "../transactions/calculations";
 import type {
   Account,
@@ -553,7 +554,8 @@ function buildProtectedContributionEvents(
   void allocations;
   const protectedTargetMinor =
     percentageOfMinor(draft.cycle.actualMainSalaryMinor, draft.cycle.protectedRateBasisPoints) +
-    (draft.cycle.additionalProtectedCommitmentMinor ?? 0);
+    (draft.cycle.additionalProtectedCommitmentMinor ?? 0) +
+    (draft.isVirtual ? 0 : pendingProtectedExtraIncomeMinor(input.snapshot, draft.cycle));
   const completedProtectedMinor = draft.isVirtual ? 0 : calculateCompletedProtectedTransfers(input, draft.cycle, input.asOfDate);
   const plannedProtectedMinor = representedEvents
     .filter((event) => event.kind === "protected_transfer" && event.deltaMinor < 0)

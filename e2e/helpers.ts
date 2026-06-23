@@ -192,7 +192,7 @@ export async function mockDriveAppDataVault(
       remoteRevision,
       profileId,
       exportedAt,
-      appVersion: "1.0.0-rc.1",
+      appVersion: "1.0.0-rc.2",
       snapshot: {
         accounts: [
           {
@@ -224,7 +224,7 @@ export async function mockDriveAppDataVault(
               onboardingStep: options.onboardingStep ?? "budget",
               createdAt: exportedAt,
               updatedAt: exportedAt,
-              createdByAppVersion: "1.0.0-rc.1"
+              createdByAppVersion: "1.0.0-rc.2"
             }),
             createdAt: exportedAt,
             updatedAt: exportedAt,

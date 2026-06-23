@@ -18,7 +18,7 @@ const account = {
 
 describe("Drive profile recovery", () => {
   it("prepares an atomic local restore from a Drive vault snapshot", () => {
-    const manifest = createProfileManifest({ now: "2026-06-22T09:42:00.000Z", appVersion: "1.0.0-rc.1", lifecycle: "live" });
+    const manifest = createProfileManifest({ now: "2026-06-22T09:42:00.000Z", appVersion: "1.0.0-rc.2", lifecycle: "live" });
     const base = createDemoSnapshot();
     const source = {
       ...base,
@@ -43,7 +43,7 @@ describe("Drive profile recovery", () => {
     const restore = prepareDriveVaultRestore({
       inspection,
       now: "2026-06-22T10:00:00.000Z",
-      appVersion: "1.0.0-rc.1",
+      appVersion: "1.0.0-rc.2",
       deviceId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39"
     });
 
@@ -80,7 +80,7 @@ describe("Drive profile recovery", () => {
       prepareDriveVaultRestore({
         inspection,
         now: "2026-06-22T10:00:00.000Z",
-        appVersion: "1.0.0-rc.1"
+        appVersion: "1.0.0-rc.2"
       })
     ).toThrow(/newer than this build supports/);
   });

@@ -4,17 +4,17 @@ This checklist is release-blocking for stable `1.0.0`. It is not claimed complet
 
 ## Automated Gate Before `1.0.0-rc.2`
 
-- [ ] `npm ci`
-- [ ] `npm run lint`
-- [ ] `npm test`
-- [ ] `npm run test:coverage`
-- [ ] `npm run typecheck`
-- [ ] `npm run build`
-- [ ] `npm run test:e2e`
+- [x] `npm ci` passed, 262 packages installed, 0 vulnerabilities.
+- [x] `npm run lint` passed.
+- [x] `npm test` passed, 35 test files and 180 tests.
+- [x] `npm run test:coverage` passed, 74.71% statements, 65.6% branches, 80.9% functions, 74.2% lines.
+- [x] `npm run typecheck` passed.
+- [x] `npm run build` passed, no Vite main-chunk warning; main index chunk 399.38 kB.
+- [x] `npm run test:e2e` passed, 64 browser tests and 80 intentional project skips.
 
-Budget Coach automated coverage passed locally on 22/06/2026; stable release still depends on the manual gate below.
+Budget Coach, Drive vault sync mocks, category management, budget progress, extra income, Daily Review, subscriptions, Recent Activity, and cycle comparison are covered by the automated gate above; stable release still depends on the manual gate below.
 
-Google Drive vault automated coverage passed locally on 22/06/2026; real Google OAuth and deployed-origin verification remain manual gates.
+Google Drive vault automated coverage uses mocked Google Identity and Drive responses; real Google OAuth and deployed-origin verification remain manual gates.
 
 ## External Manual Gate Before Stable `1.0.0`
 

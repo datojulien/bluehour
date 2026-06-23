@@ -1,6 +1,6 @@
 # Architecture
 
-Bluehour is a static React + TypeScript app hosted on GitHub Pages. It is local-first: IndexedDB is the working store and a hidden Google Drive `appDataFolder` vault is the optional cross-browser source of truth for the live profile only.
+Bluehour is a static React + TypeScript app hosted on GitHub Pages. It is local-first: IndexedDB is the working store and a hidden Google Drive `appDataFolder` vault is the primary cross-browser source of truth for the live profile only when Google sync is connected.
 
 ```mermaid
 flowchart TD
@@ -10,7 +10,7 @@ flowchart TD
   Provider --> LiveDB[bluehour-profile-live IndexedDB]
   LiveDB --> Sync[Remote snapshot sync planner]
   Sync --> Drive[Hidden Drive app-data vault slots]
-  LiveDB -. optional export .-> Sheets[Google Sheet v3 inspection export]
+  LiveDB -. optional export .-> Sheets[Google Sheet v4 inspection export]
   Provider --> Domain[Pure domain services]
 ```
 
@@ -50,7 +50,7 @@ The Continue-with-Google recovery flow is intentionally read-only until confirma
 5. Require confirmation before replacing local live data.
 6. Reconstruct live IndexedDB and shell state from the manifest.
 
-Optional legacy v1/v2/v3 Sheets remain inspection/export sources, not the primary recovery path.
+Optional legacy v1/v2/v3/v4 Sheets remain inspection/export sources, not the primary recovery path.
 
 ## Clock Model
 
@@ -64,9 +64,12 @@ Demo mode uses a deterministic clock. Live mode uses the current browser-local d
 - Google pushes use optimistic concurrency: the Drive vault revision read immediately before push must match the expected revision. If it changed, Bluehour blocks the push and asks the user to check/pull/resolve first.
 - Profile IDs are merge boundaries. Matching IDs use the normal sync planner; different IDs require explicit replace or cancel.
 - Forecasting is split between the safe-to-spend reserve calculation and a pure projected cash-flow engine. Salary boundaries are represented as explicit projection segments so payday belongs to the future cycle.
+- Extra-income protected allocations are explicit domain records. They reduce safe-to-spend while pending and require a confirmed protected transfer link before completion.
+- Budget progress is derived from one shared domain model for Overview and Budgets, including spent amounts, future reserved plans, and overspend states.
 - Budget Coach is a pure domain recommendation engine under `src/domain/budgets`. React, IndexedDB, Google sync/export adapters, and browser APIs only provide inputs, render explanations, and persist explicit user approvals.
 - Budget Coach recommendations are transient. The app persists only coaching preferences inside the validated `preferences` setting and accepted allocation records after the user approves them.
 - Import duplicate review is durable domain data (`ImportRowAudit`), not a transient UI session. Every imported row receives an auditable outcome.
+- Daily Review tasks are generated from domain records and persisted as review sessions only when the checklist changes.
 - Main routes are lazy-loaded to keep the first Vite chunk below the warning threshold without changing `chunkSizeWarningLimit`.
 
 ## Budget Coach Flow

@@ -21,7 +21,7 @@ Bluehour is not a general accounting suite and not an investment-trading termina
 2. Reserve money for obligations before showing discretionary money.
 3. Forecast the next salary date, the calendar month, and the next 30 days.
 4. Help the user maintain category budgets without forcing a rigid budgeting ideology.
-5. Keep the data portable through a private Google Sheet, CSV exports, and encrypted JSON backups.
+5. Keep the data portable through the hidden Google Drive app-data vault, optional Google Sheet inspection export, CSV exports, and encrypted JSON backups.
 
 ### Product principles
 
@@ -31,7 +31,7 @@ Bluehour is not a general accounting suite and not an investment-trading termina
 - **Preserve history:** records are archived rather than silently deleted.
 - **Calm over theatrical:** plain-language explanations, restrained charts, and no decorative dashboard clutter.
 - **Local-first interaction:** the application remains usable during a temporary loss of connectivity and synchronises later.
-- **Portable by design:** Google Sheets is the first remote store, not a permanent architectural prison.
+- **Portable by design:** Google Drive app-data sync is the primary remote path, Google Sheets remain an optional inspection/export path, and the repository boundary keeps future migration possible.
 
 ### Explicit non-goals for v1
 
@@ -102,9 +102,9 @@ Accounts are classified by their role in calculations:
 
 - The application is hosted on GitHub Pages.
 - No personal financial data is stored in the Git repository.
-- The primary remote data store is one dedicated private Google Sheet.
+- The primary remote data store is a hidden Google Drive `appDataFolder` vault made of a manifest plus two staged snapshot slots.
 - IndexedDB stores a local working cache and offline queue.
-- Google access tokens exist in memory only and are never placed in IndexedDB, localStorage, the Sheet, or the repository.
+- Google access tokens exist in memory only and are never placed in IndexedDB, localStorage, sessionStorage, Drive vault files, optional Sheets, or the repository.
 - The Mac user account is the practical local security boundary in v1; the local cache is not encrypted at rest.
 - Privacy mode visually obscures amounts but is not encryption.
 - Google connection is the only account connection; there is no additional Bluehour password or PIN.
@@ -154,7 +154,7 @@ On narrow screens, the sidebar becomes a bottom navigation bar for the five most
 
 - **Demo:** fictional local data; no Google connection.
 - **Setup:** Google connected and preferences entered, waiting for the next salary start date.
-- **Active online:** local data and Google Sheet synchronised.
+- **Active online:** local data and the Google Drive app-data vault are synchronised.
 - **Active offline:** local data available; changes enter the outbox.
 - **Needs reconnection:** local work continues, but Google requires a new user-initiated token.
 - **Conflict review:** remote and local versions of the same record require a decision.
@@ -169,18 +169,19 @@ On narrow screens, the sidebar becomes a bottom navigation bar for the five most
 Choices:
 
 - Explore demonstration
-- Set up my finances
+- Continue with Google
+- Set up locally first
 
-Copy explains that the GitHub-hosted interface is public code but the financial Sheet remains private in the user's Google account.
+Copy explains that the GitHub-hosted interface is public code but live profile data stays in local IndexedDB and, when connected, hidden files in the user's Google Drive app-data folder.
 
 ### Step 2 — Connect Google
 
 - User initiates Google authorisation.
-- Requested access is limited to files used with Bluehour.
-- Bluehour creates a dedicated spreadsheet named `Bluehour Finance Data`.
-- The spreadsheet ID is saved locally.
-- User may download a tiny connection descriptor containing the spreadsheet ID and schema version; it contains no token or secret.
-- Recovery path: paste the URL or ID of an existing Bluehour Sheet.
+- Requested access is limited to OpenID profile metadata and `drive.appdata`.
+- Bluehour creates or opens three hidden Drive app-data files: `bluehour-manifest.json`, `bluehour-slot-A.json`, and `bluehour-slot-B.json`.
+- The local connection descriptor stores non-secret Drive file IDs, schema version, profile ID, and revision metadata.
+- User may download a tiny connection descriptor containing the Drive vault IDs and schema version; it contains no token or secret.
+- Recovery path: Continue with Google and confirm the detected Drive vault before local live data is replaced.
 
 ### Step 3 — Preferences
 
@@ -730,9 +731,9 @@ Nothing is deleted automatically.
 
 Each transaction records its import-batch ID. The user can archive all records from an erroneous batch after confirmation.
 
-### Spreadsheet and CSV injection safety
+### Optional Sheet and CSV injection safety
 
-- Google Sheet writes use raw values rather than user-entered formula parsing.
+- Optional Google Sheet export writes raw values rather than user-entered formula parsing.
 - Exported text beginning with formula-trigger characters is escaped.
 - Imported text is treated as data, never executable formula content.
 
@@ -912,7 +913,7 @@ In-app alerts only:
 - Reconciliation due
 - Google authorisation required
 - Local changes waiting to sync
-- Google Sheet not recently synchronised
+- Drive vault not recently synchronised
 - Backup due at cycle close
 
 Default near-limit threshold: 80%, configurable.
@@ -1018,14 +1019,15 @@ Versions are locked when construction begins rather than hard-coded in this docu
 
 ### Storage abstraction
 
-Domain code depends on repository interfaces, not Google Sheets directly.
+Domain code depends on repository interfaces, not remote providers directly.
 
 ```text
 Domain services
     ↓
 Repository interfaces
     ├── Local IndexedDB repository
-    ├── Google Sheets sync adapter
+    ├── Google Drive app-data vault adapter
+    ├── Optional Google Sheets export adapter
     └── Future Supabase adapter
 ```
 
@@ -1174,7 +1176,7 @@ Every durable record has:
 Shows:
 
 - Local version
-- Google Sheet version
+- Remote Drive vault version
 - Field differences
 - Choose local
 - Choose remote
@@ -1735,17 +1737,18 @@ The release is acceptable when:
 
 **Milestone:** sustainable weekly operation without excessive manual cleanup.
 
-### Phase 6 — Google Sheet synchronisation
+### Phase 6 — Google Drive vault synchronisation
 
 - Google authorisation
-- Sheet creation and recovery
-- Sheet schema creation
+- Drive app-data vault creation and recovery
+- Manifest and staged slot schema creation
 - Local outbox
 - Pull/push merge
 - Conflict review
+- Optional Google Sheet inspection export
 - Sync status and resilience
 
-**Milestone:** Google Sheet becomes the private remote store.
+**Milestone:** Drive app-data vault becomes the private remote store.
 
 ### Phase 7 — Net worth, backup, and polish
 
@@ -1775,7 +1778,7 @@ The first implementation slice should deliberately avoid Google integration. It 
 7. Safe-to-spend calculation and explanation
 8. Demo dashboard
 
-Only after these domain rules are tested should Google Sheet synchronisation be added. A cloud connection cannot rescue a faulty financial calculation; it merely synchronises the fault with impressive efficiency.
+Only after these domain rules are tested should remote synchronisation be added. A cloud connection cannot rescue a faulty financial calculation; it merely synchronises the fault with impressive efficiency.
 
 ---
 
@@ -1789,7 +1792,7 @@ Migration plan:
 - Retain integer minor-unit amounts and ISO local dates.
 - Add Supabase authentication.
 - Apply Row Level Security to every user-owned table.
-- Import from the Google Sheet using the same schema version and validators.
+- Import from the Drive vault snapshot or optional Google Sheet export using the same schema version and validators.
 - Keep Google Sheet export as a portability feature.
 
 Supabase should be considered when one or more of these becomes necessary:
@@ -1801,7 +1804,7 @@ Supabase should be considered when one or more of these becomes necessary:
 - Server-side jobs
 - Stronger audit and conflict handling
 
-Until then, the Google Sheet architecture is sufficient for a one-user application provided the limitations above remain visible.
+Until then, the Drive app-data vault architecture is sufficient for a one-user application provided the limitations above remain visible.
 
 ---
 

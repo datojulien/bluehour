@@ -12,7 +12,7 @@ import {
 } from "./profileManifest";
 
 const now = "2026-06-22T09:42:00.000Z";
-const appVersion = "1.0.0-rc.1";
+const appVersion = "1.0.0-rc.2";
 
 describe("profile manifest", () => {
   it("validates setup lifecycle manifests", () => {

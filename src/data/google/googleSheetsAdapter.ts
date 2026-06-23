@@ -1,4 +1,4 @@
-export const BLUEHOUR_SCHEMA_VERSION = 3;
+export const BLUEHOUR_SCHEMA_VERSION = 4;
 
 export const GOOGLE_DOMAIN_TABS = [
   "Accounts",
@@ -13,6 +13,7 @@ export const GOOGLE_DOMAIN_TABS = [
   "RecurringRules",
   "PlanInstances",
   "Subscriptions",
+  "ExtraIncomeAllocations",
   "CategorisationRules",
   "ImportProfiles",
   "ImportBatches",

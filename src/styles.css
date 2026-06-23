@@ -830,6 +830,22 @@ h3 {
   font-size: 0.76rem;
 }
 
+.segmented-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.segmented-field legend {
+  padding: 0 6px;
+  color: var(--slate-500);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .form-actions,
 .inline-actions,
 .inline-heading {
@@ -1214,11 +1230,62 @@ h3 {
   min-width: 1080px;
 }
 
+.budget-table .data-row {
+  grid-template-columns:
+    minmax(140px, 1.2fr)
+    minmax(100px, 0.7fr)
+    minmax(110px, 0.8fr)
+    minmax(110px, 0.8fr)
+    minmax(110px, 0.8fr)
+    minmax(110px, 0.8fr)
+    minmax(190px, 1.2fr);
+  min-width: 980px;
+}
+
+.category-table .data-row {
+  grid-template-columns:
+    minmax(170px, 1.2fr)
+    minmax(120px, 0.8fr)
+    minmax(120px, 0.8fr)
+    minmax(110px, 0.7fr)
+    minmax(130px, 0.8fr)
+    minmax(180px, 1fr)
+    minmax(300px, 1.6fr);
+  min-width: 1180px;
+}
+
+.category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .price-update-form {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.subscription-actions,
+.subscription-details-form,
+.subscription-archive-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.subscription-actions {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.subscription-details-form input,
+.subscription-details-form select {
+  min-height: 34px;
+  max-width: 170px;
 }
 
 .price-update-form input:not([type="checkbox"]) {
@@ -1267,6 +1334,16 @@ h3 {
   min-height: 52px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--slate-200);
+}
+
+.activity-row {
+  color: inherit;
+  text-decoration: none;
+}
+
+.activity-row:focus-visible {
+  outline: 2px solid var(--blue-700);
+  outline-offset: -2px;
 }
 
 .alert-warning strong {

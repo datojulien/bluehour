@@ -4,7 +4,7 @@ import { createProfileManifest, profileManifestSettingRecord } from "../../domai
 import { inspectRemoteSnapshot, prepareRemoteRestore } from "./remoteProfile";
 
 const now = "2026-06-22T09:42:00.000Z";
-const appVersion = "1.0.0-rc.1";
+const appVersion = "1.0.0-rc.2";
 
 describe("remote profile recovery", () => {
   it("previews a manifest-backed remote profile without balances", () => {

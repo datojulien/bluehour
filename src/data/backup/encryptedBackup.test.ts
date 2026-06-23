@@ -13,7 +13,7 @@ describe("encrypted backup", () => {
           [],
           createProfileManifest({
             now: "2026-06-22T09:42:00.000Z",
-            appVersion: "1.0.0-rc.1",
+            appVersion: "1.0.0-rc.2",
             lifecycle: "live"
           })
         )

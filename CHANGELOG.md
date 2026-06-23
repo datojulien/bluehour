@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-rc.2 - 2026-06-23
 
 - Added local-only Budget Coach guidance for first-budget onboarding, the Budgets page, Review, and a restrained dashboard shortfall cue.
 - Added Flexible, Balanced, and Secure coaching profiles with explainable protected-rate adjustment, constrained-budget detection, safety-buffer reservation, and deterministic priority-weight allocation.
@@ -8,6 +8,14 @@
 - Added Google Sign-In plus a hidden Google Drive app-data vault as the primary browser sync path, with no persisted OAuth tokens.
 - Added Drive vault staged writes with inactive-slot validation, manifest-last commit, cross-profile merge blocking, and Settings controls for syncing, exporting the local descriptor, optional Sheet export, and disconnecting one browser.
 - Kept Google Sheets as optional manual export/inspection rather than the login or daily sync source.
+- Added RC2 category taxonomy reconciliation, category-manager create/rename/archive/restore/reorder flows, and validated category mode/group changes.
+- Added exact budget-progress domain calculations shared by Overview and Budgets, including reserved future plans, overspend states, and no hard-coded progress fallbacks.
+- Added extra-income allocation records and UI decisions for available/protected/manual/deferred income, including protected-transfer confirmation before safe-to-spend releases pending protected income.
+- Added Daily Review task generation for uncategorised splits, due plans, uncertain imports, deferred extra income, sync issues, and projected shortfalls.
+- Added real Recent Activity and cycle comparison summaries derived from transactions, plans, transfers, reconciliations, imports, subscriptions, and cycle events.
+- Added subscription monthly-equivalent math, cancellation/deadline alerts, metadata editing, and safe archive/cancel flows that preserve historical plans.
+- Incremented IndexedDB schema to v5, demo fixture version to v5, and optional Google Sheet schema to v4 for `ExtraIncomeAllocations`.
+- Added RC2 unit and Playwright coverage for category management, budget progress, extra income, Daily Review, subscriptions, cycle comparison, and activity feeds.
 
 ## 1.0.0-rc.1
 

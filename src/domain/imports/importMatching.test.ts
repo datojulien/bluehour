@@ -128,6 +128,7 @@ function snapshotWithTransactions(input: {
     recurringRules: [],
     planInstances: [],
     subscriptions: [],
+    extraIncomeAllocations: [],
     categorisationRules: [],
     importProfiles: [],
     importBatches: [],

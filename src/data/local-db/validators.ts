@@ -139,6 +139,51 @@ export const subscriptionSchema = metaSchema.extend({
   priceHistoryJson: z.string().optional()
 });
 
+export const extraIncomeAllocationSchema = metaSchema
+  .extend({
+    incomeTransactionId: z.string(),
+    budgetCycleId: z.string().optional(),
+    incomeAmountMinor: minor.positive(),
+    availableMinor: minor.nonnegative(),
+    protectedMinor: minor.nonnegative(),
+    protectedAccountId: z.string().optional(),
+    status: z.enum(["available_only", "pending_transfer", "completed", "deferred"]),
+    linkedTransferTransactionId: z.string().optional()
+  })
+  .superRefine((allocation, context) => {
+    if (allocation.availableMinor + allocation.protectedMinor !== allocation.incomeAmountMinor) {
+      context.addIssue({
+        code: "custom",
+        path: ["availableMinor"],
+        message: "Available and protected extra-income amounts must equal the income amount"
+      });
+    }
+
+    if (allocation.status === "available_only" && allocation.protectedMinor !== 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "Available-only extra income cannot reserve a protected amount"
+      });
+    }
+
+    if ((allocation.status === "pending_transfer" || allocation.status === "completed") && allocation.protectedMinor <= 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["protectedMinor"],
+        message: "Protected extra-income decisions require a protected amount"
+      });
+    }
+
+    if (allocation.status === "completed" && !allocation.linkedTransferTransactionId) {
+      context.addIssue({
+        code: "custom",
+        path: ["linkedTransferTransactionId"],
+        message: "Completed extra-income allocations require a linked protected transfer"
+      });
+    }
+  });
+
 export const categorisationRuleSchema = metaSchema.extend({
   name: z.string(),
   priority: z.number().int(),
@@ -316,6 +361,7 @@ export const syncedStoreSchemas = {
   recurringRules: recurringRuleSchema,
   planInstances: planInstanceSchema,
   subscriptions: subscriptionSchema,
+  extraIncomeAllocations: extraIncomeAllocationSchema,
   categorisationRules: categorisationRuleSchema,
   importProfiles: importProfileSchema,
   importBatches: importBatchSchema,

@@ -17,6 +17,7 @@ export const SYNCED_STORES = [
   "recurringRules",
   "planInstances",
   "subscriptions",
+  "extraIncomeAllocations",
   "categorisationRules",
   "importProfiles",
   "importBatches",

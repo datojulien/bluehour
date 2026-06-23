@@ -14,6 +14,7 @@ Bluehour is a static browser app. The deployed app code is public. The user's fi
 - Demo exports are labelled fictional.
 - Budget Coach runs entirely in the browser against local data. It does not call AI services, advice APIs, analytics, telemetry, remote logging, or external financial-data services.
 - Budget Coach is educational budgeting guidance only. It must not be represented as investment, tax, legal, credit, or regulated financial advice.
+- Category management, extra-income allocation, Daily Review, Recent Activity, cycle comparison, and subscription alerts are local derivations from IndexedDB or the Drive vault snapshot. They do not introduce analytics, telemetry, or third-party finance calls.
 - Continue-with-Google inspection does not replace a meaningful local profile until the user confirms restore/replacement.
 - Automatic sync uses only a currently valid in-memory token. When the one-hour gate expires, sync pauses until the user reconnects with Google.
 

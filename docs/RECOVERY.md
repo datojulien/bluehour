@@ -37,9 +37,9 @@ If the live profile on this device already contains meaningful records, Bluehour
 
 Remote restore is atomic from the user's perspective: validation happens before local replacement, downloaded data creates no outbox operations, the Drive connection descriptor is saved locally, `syncState` records the remote revision, and shell state is reconstructed from the manifest.
 
-## Optional Legacy Sheet Inspection
+## Optional Sheet Inspection
 
-Legacy v1/v2/v3 Sheets may not contain a profile manifest. Bluehour keeps Sheet code for optional export and legacy inspection, but Sheets are not the primary recovery or sync source.
+Legacy v1/v2/v3 Sheets may not contain a profile manifest. Current v4 Sheets include `ExtraIncomeAllocations` for inspection export. Bluehour keeps Sheet code for optional export and legacy inspection, but Sheets are not the primary recovery or sync source.
 
 ## Stale Device Recovery
 

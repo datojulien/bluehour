@@ -38,7 +38,7 @@ import {
 } from "../../data/google/driveAppDataVault";
 import { GOOGLE_DRIVE_VAULT_SCOPES, clearInMemoryGoogleAccessToken, getInMemoryGoogleAccessToken } from "../../data/google/googleAuth";
 import { planRemoteSnapshotSync } from "../../data/sync/remoteSync";
-import { createTransactionRecords, type TransactionDraft } from "../../domain/transactions/commands";
+import { createTransactionRecords, type TransactionCommandResult, type TransactionDraft } from "../../domain/transactions/commands";
 import {
   createProfileManifest,
   manifestCheckpointForShell,
@@ -74,7 +74,7 @@ interface BluehourDataContextValue {
   setOnboardingStep: (step: OnboardingStep, state?: ApplicationState) => Promise<void>;
   saveRecordsAndAdvanceOnboarding: (mutations: LocalMutation[], step: OnboardingStep, state?: ApplicationState, label?: string) => Promise<void>;
   enterLiveMode: () => Promise<void>;
-  saveTransaction: (draft: TransactionDraft) => Promise<void>;
+  saveTransaction: (draft: TransactionDraft) => Promise<TransactionCommandResult>;
   saveRecord: (storeName: MutableStoreName, record: MutableRecord, label?: string) => Promise<void>;
   saveRecords: (mutations: LocalMutation[], label?: string) => Promise<void>;
   archiveRecord: (storeName: Parameters<typeof archiveLocalRecord>[1], recordId: string) => Promise<void>;
@@ -275,7 +275,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
     await saveRecords([{ storeName, record }], label);
   }
 
-  async function saveTransaction(draft: TransactionDraft) {
+  async function saveTransaction(draft: TransactionDraft): Promise<TransactionCommandResult> {
     assertWritable("transaction");
     const profileId = requireProfile();
     if (!snapshot) {
@@ -299,6 +299,7 @@ export function BluehourDataProvider({ children }: { children: ReactNode }) {
 
     await putLocalRecords(profileId, mutations, "transaction");
     setSnapshot(await loadProfileSnapshot(profileId));
+    return result;
   }
 
   async function archiveRecord(storeName: Parameters<typeof archiveLocalRecord>[1], recordId: string) {

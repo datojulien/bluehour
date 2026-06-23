@@ -94,8 +94,8 @@ describe("Google Sheet sync planner", () => {
   });
 
   it("blocks automatic sync when profile IDs differ", () => {
-    const localManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
-    const remoteManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
+    const localManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.2" });
+    const remoteManifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.2" });
     const base = createDemoSnapshot();
     const local = {
       ...base,
@@ -115,7 +115,7 @@ describe("Google Sheet sync planner", () => {
   });
 
   it("permits sync planning when profile IDs match", () => {
-    const manifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.1" });
+    const manifest = createProfileManifest({ now: "2026-06-22T00:00:00.000Z", appVersion: "1.0.0-rc.2" });
     const base = createDemoSnapshot();
     const local = {
       ...base,

@@ -72,6 +72,7 @@ function testSnapshot(overrides: Partial<BluehourSnapshot> = {}): BluehourSnapsh
       })
     ],
     subscriptions: [],
+    extraIncomeAllocations: [],
     categorisationRules: [],
     importProfiles: [],
     importBatches: [],

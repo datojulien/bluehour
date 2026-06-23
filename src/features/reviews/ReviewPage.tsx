@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Check, Save } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { calculateAccountBalances } from "../../domain/accounts/calculations";
@@ -7,6 +7,7 @@ import { closeSalaryCycleWithActualSalary } from "../../domain/forecasting/cycle
 import { decideImportAudit, parseAuditCandidates, transactionDraftFromAudit } from "../../domain/imports/importAudit";
 import { parseMoneyInput, percentageOfMinor } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
+import { dailyReviewTasks, parseDailyReviewItems, upsertDailyReviewSession } from "../../domain/reviews/dailyReview";
 import { createTransactionRecords } from "../../domain/transactions/commands";
 import { calculateCategoryActuals } from "../../domain/transactions/calculations";
 import type { BudgetAllocation, BudgetCycle, Category, ImportRowAudit, Reconciliation, ReviewSession, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
@@ -52,6 +53,29 @@ export function ReviewPage() {
         : null,
     [activeCycle, asOfDate, coachPreferences, snapshot]
   );
+  const dailyTasks = useMemo(() => (snapshot ? dailyReviewTasks(snapshot, asOfDate) : []), [asOfDate, snapshot]);
+  const dailyReview = useMemo(
+    () => snapshot?.reviewSessions.find((review) => isActive(review) && review.type === "daily" && review.periodKey === asOfDate),
+    [asOfDate, snapshot]
+  );
+  const desiredDailyReview = useMemo(
+    () => (snapshot ? upsertDailyReviewSession(dailyReview, dailyTasks, asOfDate) : null),
+    [asOfDate, dailyReview, dailyTasks, snapshot]
+  );
+
+  useEffect(() => {
+    if (!desiredDailyReview || loading || error || !snapshot) {
+      return;
+    }
+    if (
+      !dailyReview ||
+      dailyReview.itemsJson !== desiredDailyReview.itemsJson ||
+      dailyReview.status !== desiredDailyReview.status ||
+      dailyReview.completedAt !== desiredDailyReview.completedAt
+    ) {
+      void saveRecord("reviewSessions", desiredDailyReview, "daily review checklist");
+    }
+  }, [dailyReview, desiredDailyReview, error, loading, saveRecord, snapshot]);
 
   if (loading) {
     return <div className="loading-state">Opening review…</div>;
@@ -180,6 +204,32 @@ export function ReviewPage() {
       {message ? <section className="alert-band">{message}</section> : null}
 
       <section className="two-column">
+        <section className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Daily</p>
+              <h2>Review checklist</h2>
+            </div>
+          </div>
+          {desiredDailyReview && parseDailyReviewItems(desiredDailyReview).length > 0 ? (
+            <div className="checklist">
+              {parseDailyReviewItems(desiredDailyReview).map((item) => (
+                <button
+                  className={`check-item${item.complete ? " complete" : ""}`}
+                  type="button"
+                  key={item.id}
+                  onClick={() => void toggleChecklistItem(desiredDailyReview, item.id)}
+                >
+                  <Check size={16} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p>No open daily tasks.</p>
+          )}
+        </section>
+
         <section className="dashboard-band">
           <div className="band-header">
             <div>

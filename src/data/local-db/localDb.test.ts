@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { openDB } from "idb";
 import { createRecordMeta } from "../../domain/records";
-import type { Account } from "../../domain/types";
+import type { Account, Category } from "../../domain/types";
 import {
   LEGACY_DB_NAME,
   PROFILE_DB_NAMES,
@@ -189,6 +189,62 @@ describe("local IndexedDB repository", () => {
     reopened.close();
   });
 
+  it("repairs existing live starter categories and queues them for remote sync", async () => {
+    await deleteDatabase(PROFILE_DB_NAMES.live);
+    const db = await openDB(PROFILE_DB_NAMES.live, INDEXED_DB_SCHEMA_VERSION, {
+      upgrade(upgradeDb) {
+        [
+          "accounts",
+          "balanceSnapshots",
+          "transactions",
+          "transactionLegs",
+          "transactionSplits",
+          "categories",
+          "budgetCycles",
+          "budgetAllocations",
+          "budgetTransfers",
+          "recurringRules",
+          "planInstances",
+          "subscriptions",
+          "extraIncomeAllocations",
+          "categorisationRules",
+          "importProfiles",
+          "importBatches",
+          "importRowAudits",
+          "reconciliations",
+          "reviewSessions",
+          "settings",
+          "outboxOperations",
+          "conflicts"
+        ].forEach((store) => upgradeDb.createObjectStore(store, { keyPath: "id" }));
+        upgradeDb.createObjectStore("syncState", { keyPath: "key" });
+        upgradeDb.createObjectStore("meta", { keyPath: "key" });
+      }
+    });
+    const dining: Category = {
+      ...createRecordMeta("cat-dining"),
+      id: "cat-dining",
+      name: "Meals Out",
+      group: "discretionary",
+      nature: "discretionary",
+      reservationMode: "none",
+      sortOrder: 10,
+      active: true
+    };
+    await db.put("categories", dining);
+    await db.put("syncState", { key: "google", status: "synced", provider: "drive_appdata", remoteRevision: 2 });
+    db.close();
+
+    const snapshot = await loadLiveSnapshot();
+
+    expect(snapshot.categories.find((category) => category.id === "cat-dining")).toMatchObject({
+      name: "Meals Out",
+      reservationMode: "envelope"
+    });
+    expect(snapshot.outboxOperations.some((operation) => operation.tableName === "categories" && operation.recordId === "cat-dining")).toBe(true);
+    expect(snapshot.syncState[0]?.status).toBe("waiting_to_sync");
+  });
+
   it("validates backup replacement before clearing the current profile", async () => {
     await deleteDatabase(PROFILE_DB_NAMES.live);
     const account: Account = {
@@ -213,7 +269,7 @@ describe("local IndexedDB repository", () => {
     expect(live.accounts.map((record) => record.name)).toEqual(["Keep me"]);
   });
 
-  it("upgrades a previous profile database by adding import audit storage without clearing records", async () => {
+  it("upgrades a previous profile database by adding extra income storage without clearing records", async () => {
     await deleteDatabase(PROFILE_DB_NAMES.live);
     const oldStores = [
       "accounts",
@@ -263,5 +319,6 @@ describe("local IndexedDB repository", () => {
 
     expect(snapshot.accounts.map((record) => record.name)).toContain("Preserved account");
     expect(snapshot.importRowAudits).toEqual([]);
+    expect(snapshot.extraIncomeAllocations).toEqual([]);
   });
 });

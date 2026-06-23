@@ -143,18 +143,29 @@ export function createDemoSnapshot(): BluehourSnapshot {
     category("cat-internet-mobile", "Internet & Mobile", "committed", "essential", "plan", 3),
     category("cat-insurance", "Insurance", "committed", "essential", "plan", 4),
     category("cat-subscriptions", "Subscriptions", "committed", "discretionary", "plan", 5),
-    category("cat-groceries", "Groceries", "essential_flexible", "essential", "envelope", 6),
-    category("cat-fuel", "Fuel", "essential_flexible", "essential", "envelope", 7),
-    category("cat-transport", "Transport", "essential_flexible", "essential", "envelope", 8),
-    category("cat-household", "Household", "essential_flexible", "essential", "envelope", 9),
-    category("cat-dining", "Dining Out", "discretionary", "discretionary", "envelope", 10),
-    category("cat-entertainment", "Entertainment", "discretionary", "discretionary", "envelope", 11),
-    category("cat-shopping", "Shopping", "discretionary", "discretionary", "envelope", 12),
-    category("cat-savings", "Savings", "protected", "protected", "protected", 13),
-    category("cat-transfers", "Transfers", "administrative", "administrative", "none", 14),
-    category("cat-income", "Income", "administrative", "administrative", "none", 15),
-    category("cat-reconciliation", "Reconciliation", "administrative", "administrative", "none", 16),
-    category("cat-uncategorised", "Uncategorised", "administrative", "administrative", "none", 17)
+    category("cat-fixed-transport", "Fixed Transport", "committed", "essential", "plan", 6),
+    category("cat-groceries", "Groceries", "essential_flexible", "essential", "envelope", 7),
+    category("cat-fuel", "Fuel", "essential_flexible", "essential", "envelope", 8),
+    category("cat-transport", "Transport", "essential_flexible", "essential", "envelope", 9),
+    category("cat-tolls-parking", "Tolls & Parking", "essential_flexible", "essential", "envelope", 10),
+    category("cat-household", "Household", "essential_flexible", "essential", "envelope", 11),
+    category("cat-essential-personal-care", "Essential Personal Care", "essential_flexible", "essential", "envelope", 12),
+    category("cat-dining", "Dining Out", "discretionary", "discretionary", "envelope", 13),
+    category("cat-entertainment", "Entertainment", "discretionary", "discretionary", "envelope", 14),
+    category("cat-shopping", "Shopping", "discretionary", "discretionary", "envelope", 15),
+    category("cat-travel", "Travel", "discretionary", "discretionary", "envelope", 16),
+    category("cat-hobbies", "Hobbies", "discretionary", "discretionary", "envelope", 17),
+    category("cat-gifts", "Gifts", "discretionary", "discretionary", "envelope", 18),
+    category("cat-miscellaneous", "Miscellaneous", "discretionary", "discretionary", "envelope", 19),
+    category("cat-savings", "Savings", "protected", "protected", "protected", 20),
+    category("cat-investments", "Investments", "protected", "protected", "protected", 21),
+    category("cat-planned-major-payments", "Planned Major Payments", "protected", "protected", "protected", 22),
+    category("cat-transfers", "Transfers", "administrative", "administrative", "none", 23),
+    category("cat-income", "Income", "administrative", "administrative", "none", 24),
+    category("cat-reconciliation", "Reconciliation", "administrative", "administrative", "none", 25),
+    category("cat-uncategorised", "Uncategorised", "administrative", "administrative", "none", 26),
+    category("cat-bank-fees", "Bank Fees", "administrative", "administrative", "none", 27),
+    category("cat-taxes", "Taxes", "administrative", "administrative", "none", 28)
   ];
 
   const budgetCycles: BudgetCycle[] = [
@@ -279,6 +290,7 @@ export function createDemoSnapshot(): BluehourSnapshot {
       notes: "Fictional demo subscription."
     }
   ];
+  const extraIncomeAllocations: BluehourSnapshot["extraIncomeAllocations"] = [];
 
   const recurringRules: RecurringRule[] = [
     {
@@ -440,6 +452,7 @@ export function createDemoSnapshot(): BluehourSnapshot {
     recurringRules,
     planInstances,
     subscriptions,
+    extraIncomeAllocations,
     categorisationRules,
     importProfiles,
     importBatches,

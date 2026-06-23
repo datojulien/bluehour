@@ -87,7 +87,7 @@ Bluehour does not store refresh tokens. The current browser tab may reuse an acc
 
 ## Optional Sheet Export
 
-Settings can create or update a Google Sheet for manual inspection. Sheet schema v3 still uses `Meta`, active/inactive tabs, runtime validation, and read-back comparison. Legacy v1 and v2 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
+Settings can create or update a Google Sheet for manual inspection. Sheet schema v4 uses `Meta`, active/inactive tabs, runtime validation, read-back comparison, and the `ExtraIncomeAllocations` tab. Legacy v1, v2, and v3 Sheets remain readable as mocked migration sources for inspection/export work, but Sheets are no longer the primary sync source.
 
 ## Testing
 

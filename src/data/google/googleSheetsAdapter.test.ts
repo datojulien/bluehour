@@ -25,7 +25,7 @@ describe("Google Sheets adapter", () => {
 
     expect(descriptor).toEqual({
       spreadsheetId: "sheet-1",
-      sheetSchemaVersion: 3,
+      sheetSchemaVersion: 4,
       profileId: "0f9a12be-2c61-4f29-8e36-8f9272aa8f39",
       lastKnownRemoteRevision: 4,
       lastSuccessfulSyncAt: "2026-06-22T09:42:00.000Z"

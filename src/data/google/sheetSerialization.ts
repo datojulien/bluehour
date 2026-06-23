@@ -46,6 +46,7 @@ const STORE_BY_TAB = {
   RecurringRules: "recurringRules",
   PlanInstances: "planInstances",
   Subscriptions: "subscriptions",
+  ExtraIncomeAllocations: "extraIncomeAllocations",
   CategorisationRules: "categorisationRules",
   ImportProfiles: "importProfiles",
   ImportBatches: "importBatches",

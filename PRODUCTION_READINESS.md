@@ -1,40 +1,37 @@
 # Bluehour Production Readiness
 
-Last updated: 22/06/2026
+Last updated: 23/06/2026
 
 ## Release Candidate Status
 
-Bluehour is prepared as `1.0.0-rc.1` when the automated verification suite below passes on the release-candidate files.
+Bluehour is prepared as `1.0.0-rc.2` when the automated verification suite below passes on the release-candidate files.
 
 This is not a stable `1.0.0` release. Real Google OAuth, real Drive app-data vault sync, optional Sheet export verification, and GitHub Pages deployment remain manual release gates for stable production use.
 
-## Budget Coach Status
+## V1 RC2 Status
 
-Budget Coach remains local-only browser guidance and is covered by the automated verification suite listed below.
+RC2 hardens the release-candidate track around the daily product loop:
 
-Budget Coach is deterministic, explainable, and local-only. It guides first-cycle onboarding, remains available in Budgets and Review, detects constrained budgets, excludes possible variable income from base budgets, applies Flexible/Balanced/Secure protected-rate profiles, reserves the safety buffer as unallocated cash, and improves confidence with completed-cycle medians.
+- Drive app-data vault remains the primary live-profile sync path; Google Sheets remain optional export/inspection only.
+- IndexedDB schema is v5, demo fixture version is v5, and optional Sheet schema is v4.
+- Extra-income decisions are durable records and pending protected allocations reduce safe-to-spend until a protected transfer is explicitly linked.
+- Category taxonomy reconciliation is non-destructive and the category manager supports create, rename, archive, restore, reorder, and validated mode/group changes.
+- Overview and Budgets share exact budget-progress math, including future reserved plans and overspend states.
+- Daily Review, Recent Activity, cycle comparison, and subscription management are backed by domain calculations and RC2 browser coverage.
 
-The local verification attempt on 22/06/2026 passed lint, unit tests, coverage, typecheck, build, and the full Playwright suite with Chromium, WebKit, and mobile-scoped coverage.
+## Verified Automated Gate
 
-## Google Drive Vault Status
-
-Google-only browser login and Drive app-data vault synchronisation have been added and passed the automated verification suite listed below.
-
-The implementation adds Google Sign-In profile metadata, one-hour memory-only access-token reuse, automatic in-session Drive vault sync, a hidden Drive app-data vault with manifest-last staged writes, profile-ID merge blocking, Settings Drive vault controls, local-only onboarding status, and optional Google Sheet export for inspection. It still requires real Google laptop-to-desktop verification before stable production use.
-
-## Verified Automated Gates
-
-These commands were run locally from a clean dependency install during this pass:
+These commands were run locally from a clean dependency install during the RC2 pass:
 
 - `npm ci`: passed, 262 packages installed, 0 vulnerabilities.
 - `npm run lint`: passed.
-- `npm test`: passed, 27 test files and 145 tests.
-- `npm run test:coverage`: passed, 83.55% statements, 71.4% branches, 88.27% functions, 83.4% lines.
+- `npm test`: passed, 35 test files and 180 tests.
+- `npm run test:coverage`: passed, 74.71% statements, 65.6% branches, 80.9% functions, 74.2% lines.
 - `npm run typecheck`: passed.
-- `npm run build`: passed, no Vite main-chunk warning; route-level lazy loading keeps the main app chunk at 388.23 kB.
-- `npm run test:e2e`: passed, 54 browser tests and 72 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
+- `npm run build`: passed, no Vite main-chunk warning; the main index chunk was 399.38 kB.
+- `npm run test:e2e`: passed, 64 browser tests and 80 intentional project skips across Chromium, WebKit, and mobile-scoped coverage.
 
-## Completed In `1.0.0-rc.1`
+## Completed Across The RC Track
 
 - [x] Centralised cross-salary projection into explicit forecast segments.
 - [x] Assigned payday only to the future salary cycle.
@@ -44,7 +41,7 @@ These commands were run locally from a clean dependency install during this pass
 - [x] Excluded possible payday income while preserving it in the explanatory breakdown.
 - [x] Added month-end, leap-year, and early-holiday salary-boundary tests.
 - [x] Added a reserve-aware domain cash-flow projection engine.
-- [x] Included committed payments, subscriptions, essential dated plans, deterministic undated essential distributions, discretionary reserved plans, projected income, and protected reserve assumptions.
+- [x] Included committed payments, subscriptions, essential dated plans, deterministic undated essential distributions, discretionary reserved plans, projected income, protected reserve assumptions, and pending protected extra-income allocations.
 - [x] Treated safety buffer as a threshold, not as a cash movement.
 - [x] Evaluated cross-cycle buffers per segment and reported the limiting segment instead of summing buffers.
 - [x] Added exact integer-sen reconciliation for projected closing spendable balance.
@@ -56,25 +53,28 @@ These commands were run locally from a clean dependency install during this pass
 - [x] Persisted uncertain import candidates across reload and added user decisions to link, create, or ignore.
 - [x] Added same-file import warning and deliberate re-import confirmation.
 - [x] Changed rollback to archive only transactions created by that import batch while preserving linked pre-existing transactions and audit history.
-- [x] Added `importRowAudits` to IndexedDB, validated snapshots, encrypted backup/restore, Google Sheet serialisation, and sync conflict data.
-- [x] Incremented IndexedDB schema to v4 with a non-destructive upgrade path.
-- [x] Incremented Google Sheet schema to v3 while keeping v1 and v2 readable as migration sources.
+- [x] Added `importRowAudits` to IndexedDB, validated snapshots, encrypted backup/restore, optional Google Sheet serialisation, and sync conflict data.
+- [x] Incremented IndexedDB schema to v5 with non-destructive upgrade paths.
+- [x] Incremented optional Google Sheet schema to v4 while keeping older mocked migration sources readable for inspection/export work.
 - [x] Preserved staged Google remote writes with inactive-slot writes, full read-back, runtime validation, round-trip comparison, and commit metadata written last.
-- [x] Added mocked Google schema round-trip and migration-source tests for the audit model.
+- [x] Added mocked Google schema round-trip and migration-source tests for the audit and extra-income models.
 - [x] Added Google Sign-In profile metadata with Drive app-data scope and no persisted OAuth tokens.
 - [x] Added memory-only token reuse for the current tab with a one-hour reconnection gate.
 - [x] Added automatic Drive vault sync for queued live changes while the in-memory Google session is active.
 - [x] Added hidden Drive vault files for `bluehour-manifest.json`, `bluehour-slot-A.json`, and `bluehour-slot-B.json`.
 - [x] Refactored the sync planner around provider-neutral remote snapshots while keeping Google Sheets as optional export/inspection.
 - [x] Added mocked Drive vault tests for staged writes, unsupported-schema recovery, profile restore, and browser login flows.
+- [x] Added exact budget-progress domain calculations shared by Overview and Budgets.
+- [x] Added category taxonomy reconciliation and category manager workflows.
+- [x] Added extra-income allocation, Daily Review, Recent Activity, cycle comparison, and subscription hardening.
 - [x] Added WebKit critical-flow coverage while retaining Chromium coverage.
 - [x] Updated GitHub Actions to install Chromium and WebKit Playwright browsers.
-- [x] Added `CHANGELOG.md`, `docs/RC_CHECKLIST.md`, and refreshed architecture, data model, Google sync, security, recovery, and README documentation.
+- [x] Added `CHANGELOG.md`, `docs/RC_CHECKLIST.md`, `docs/V1_ACCEPTANCE.md`, ADR-001, and refreshed architecture, data model, Google sync, security, recovery, and README documentation.
 - [x] Displayed the application version in Settings/About.
 
 ## External Manual Release Gate
 
-The only expected unchecked stable-release gate is real external Google verification. It must be completed from the deployed site with a real Google account before Bluehour is labelled stable `1.0.0`.
+The expected unchecked stable-release gate is real external Google verification. It must be completed from the deployed site with a real Google account before Bluehour is labelled stable `1.0.0`.
 
 The required manual checklist is in `docs/RC_CHECKLIST.md` and includes:
 

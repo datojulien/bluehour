@@ -2,6 +2,7 @@ import { calculateAccountBalances, calculateNetSpendableBalance, type AccountBal
 import { calculateCategoryAllocation, calculateRemainingAllocation } from "../budgets/calculations";
 import { addDays, compareIsoDate, daysBetweenInclusive, isOnOrAfter, isOnOrBefore, isWithinInclusive } from "../dates";
 import { clampNonNegative, percentageOfMinor } from "../money";
+import { pendingProtectedExtraIncomeMinor } from "../income/extraIncomeAllocation";
 import { calculateCategoryActuals } from "../transactions/calculations";
 import type {
   Account,
@@ -12,6 +13,7 @@ import type {
   Category,
   IsoDate,
   PlanInstance,
+  ExtraIncomeAllocation,
   Transaction,
   TransactionLeg,
   TransactionSplit
@@ -33,6 +35,7 @@ export interface SafeToSpendInput {
   budgetAllocations: readonly BudgetAllocation[];
   budgetTransfers: readonly BudgetTransfer[];
   planInstances: readonly PlanInstance[];
+  extraIncomeAllocations: readonly ExtraIncomeAllocation[];
   includeFutureIncome: boolean;
 }
 
@@ -110,7 +113,8 @@ export function calculateSafeToSpend(input: SafeToSpendInput): SafeToSpendResult
   const completedProtectedMinor = calculateCompletedProtectedTransfers(input);
   const protectedTargetMinor =
     percentageOfMinor(input.cycle.actualMainSalaryMinor, input.cycle.protectedRateBasisPoints) +
-    (input.cycle.additionalProtectedCommitmentMinor ?? 0);
+    (input.cycle.additionalProtectedCommitmentMinor ?? 0) +
+    pendingProtectedExtraIncomeMinor({ extraIncomeAllocations: input.extraIncomeAllocations }, input.cycle);
   const protectedReserveMinor = clampNonNegative(protectedTargetMinor - completedProtectedMinor);
   const bufferBaseMinor = committedReserveMinor + essentialEnvelopeReserveMinor;
   const bufferReserveMinor = Math.max(input.cycle.bufferMinimumMinor, percentageOfMinor(bufferBaseMinor, input.cycle.bufferEssentialRateBasisPoints));

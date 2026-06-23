@@ -19,6 +19,7 @@ function inputFromDemo(demo: BluehourSnapshot = createDemoSnapshot(), overrides:
     budgetAllocations: demo.budgetAllocations,
     budgetTransfers: demo.budgetTransfers,
     planInstances: demo.planInstances,
+    extraIncomeAllocations: demo.extraIncomeAllocations,
     includeFutureIncome: false,
     ...overrides
   };

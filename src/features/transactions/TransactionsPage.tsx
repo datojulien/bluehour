@@ -4,6 +4,13 @@ import { useSearchParams } from "react-router-dom";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { findRuleProposals, matchesRule } from "../../domain/categorisation/rules";
 import { formatDisplayDate } from "../../domain/dates";
+import {
+  activeCycleForIncome,
+  createExtraIncomeAllocation,
+  linkProtectedExtraIncomeTransfer,
+  updateExtraIncomeAllocation,
+  type ExtraIncomeAllocationDraft
+} from "../../domain/income/extraIncomeAllocation";
 import { detectDelimiter, hashText, parseCsv, parseCsvDate } from "../../domain/imports/csv";
 import {
   createImportRowAudit,
@@ -16,7 +23,17 @@ import { rankDuplicateCandidates } from "../../domain/imports/importMatching";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
 import { createTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
-import type { CategorisationRule, ImportBatch, ImportProfile, RecordMeta, Transaction, TransactionLeg, TransactionSplit } from "../../domain/types";
+import type {
+  BluehourSnapshot,
+  CategorisationRule,
+  ExtraIncomeAllocation,
+  ImportBatch,
+  ImportProfile,
+  RecordMeta,
+  Transaction,
+  TransactionLeg,
+  TransactionSplit
+} from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 import type { LocalMutation } from "../../data/local-db/localDb";
@@ -43,6 +60,16 @@ export function TransactionsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | Transaction["type"]>("all");
+  const [pendingExtraIncome, setPendingExtraIncome] = useState<{
+    transactionId: string;
+    amountMinor: number;
+    budgetCycleId?: string;
+  } | null>(null);
+  const [pendingTransferLink, setPendingTransferLink] = useState<{
+    transferTransactionId: string;
+    allocationIds: string[];
+  } | null>(null);
+  const [editingExtraIncomeId, setEditingExtraIncomeId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const openComposer = searchParams.get("new") === "1";
@@ -94,6 +121,10 @@ export function TransactionsPage() {
   const categoriesById = new Map(snapshot.categories.map((category) => [category.id, category]));
   const activeAccounts = snapshot.accounts.filter(isActive).sort((left, right) => left.sortOrder - right.sortOrder);
   const activeCategories = snapshot.categories.filter((category) => isActive(category) && category.active).sort((left, right) => left.sortOrder - right.sortOrder);
+  const editableExtraIncomeAllocations = snapshot.extraIncomeAllocations
+    .filter((allocation) => isActive(allocation) && allocation.status !== "completed")
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const editingExtraIncome = editingExtraIncomeId ? editableExtraIncomeAllocations.find((allocation) => allocation.id === editingExtraIncomeId) : undefined;
 
   async function handleImport(text: string, options: CsvImportOptions) {
     if (!snapshot) {
@@ -402,10 +433,118 @@ export function TransactionsPage() {
           defaultDate={asOfDate}
           onCancel={() => setSearchParams({})}
           onSave={async (draft) => {
-            await saveTransaction(draft);
+            const result = await saveTransaction(draft);
             setSearchParams({});
+            if (result.transaction.type === "income" && !isMainSalaryIncomeDraft(draft, loadedSnapshot)) {
+              const cycle = activeCycleForIncome(result.transaction, loadedSnapshot.budgetCycles);
+              setPendingExtraIncome({
+                transactionId: result.transaction.id,
+                amountMinor: draft.amountMinor,
+                budgetCycleId: cycle?.id
+              });
+              setMessage("Income saved. Choose how the extra income should affect safe-to-spend.");
+              return;
+            }
+            if (result.transaction.type === "transfer") {
+              const candidates = matchingProtectedExtraIncomeAllocations(draft, loadedSnapshot);
+              if (candidates.length > 0) {
+                setPendingTransferLink({
+                  transferTransactionId: result.transaction.id,
+                  allocationIds: candidates.map((allocation) => allocation.id)
+                });
+                setMessage("Transfer saved. Confirm whether it completes a protected extra-income allocation.");
+                return;
+              }
+            }
             setMessage("Transaction saved locally.");
           }}
+        />
+      ) : null}
+
+      {pendingExtraIncome ? (
+        <ExtraIncomeAllocationPanel
+          allocation={pendingExtraIncome}
+          protectedAccounts={activeAccounts.filter((account) => account.role === "protected")}
+          onSave={async (record) => {
+            await saveRecords([{ storeName: "extraIncomeAllocations", record }], "extra income allocation");
+            setPendingExtraIncome(null);
+            setMessage("Extra income allocation saved. Protected amounts remain pending until you record and link the transfer.");
+          }}
+          onCancel={() => {
+            void saveRecords(
+              [
+                {
+                  storeName: "extraIncomeAllocations",
+                  record: createExtraIncomeAllocation({
+                    incomeTransactionId: pendingExtraIncome.transactionId,
+                    budgetCycleId: pendingExtraIncome.budgetCycleId,
+                    incomeAmountMinor: pendingExtraIncome.amountMinor,
+                    availableMinor: pendingExtraIncome.amountMinor,
+                    protectedMinor: 0,
+                    status: "deferred"
+                  })
+                }
+              ],
+              "deferred extra income allocation"
+            ).then(() => {
+              setPendingExtraIncome(null);
+              setMessage("Extra income allocation deferred for Daily Review.");
+            });
+          }}
+        />
+      ) : null}
+
+      {editingExtraIncome ? (
+        <ExtraIncomeAllocationPanel
+          allocation={{
+            transactionId: editingExtraIncome.incomeTransactionId,
+            amountMinor: editingExtraIncome.incomeAmountMinor,
+            budgetCycleId: editingExtraIncome.budgetCycleId,
+            existingAllocation: editingExtraIncome
+          }}
+          protectedAccounts={activeAccounts.filter((account) => account.role === "protected")}
+          cancelActionLabel="Close"
+          onSave={async (record) => {
+            await saveRecords([{ storeName: "extraIncomeAllocations", record }], "extra income allocation edit");
+            setEditingExtraIncomeId(null);
+            setMessage("Extra income allocation updated.");
+          }}
+          onCancel={() => setEditingExtraIncomeId(null)}
+        />
+      ) : null}
+
+      {pendingTransferLink ? (
+        <ProtectedTransferLinkPanel
+          allocations={snapshot.extraIncomeAllocations.filter((allocation) => pendingTransferLink.allocationIds.includes(allocation.id) && isActive(allocation))}
+          transactions={snapshot.transactions}
+          accounts={snapshot.accounts}
+          transferTransactionId={pendingTransferLink.transferTransactionId}
+          onLink={async (allocation) => {
+            await saveRecords(
+              [
+                {
+                  storeName: "extraIncomeAllocations",
+                  record: linkProtectedExtraIncomeTransfer(allocation, pendingTransferLink.transferTransactionId)
+                }
+              ],
+              "extra income transfer link"
+            );
+            setPendingTransferLink(null);
+            setMessage("Protected extra-income transfer linked. Safe-to-spend no longer holds that pending reserve.");
+          }}
+          onDismiss={() => {
+            setPendingTransferLink(null);
+            setMessage("Transfer saved locally without linking an extra-income allocation.");
+          }}
+        />
+      ) : null}
+
+      {!pendingExtraIncome && !editingExtraIncome ? (
+        <ExtraIncomeAllocationBacklog
+          allocations={editableExtraIncomeAllocations}
+          transactions={snapshot.transactions}
+          accounts={snapshot.accounts}
+          onEdit={(allocation) => setEditingExtraIncomeId(allocation.id)}
         />
       ) : null}
 
@@ -507,6 +646,278 @@ function archiveRecordValue<T extends RecordMeta>(record: T): T {
     updatedAt: now,
     revision: record.revision + 1
   };
+}
+
+function isMainSalaryIncomeDraft(draft: TransactionDraft, snapshot: { planInstances: Array<{ id: string; isMainSalaryEstimate?: boolean }> }): boolean {
+  if (draft.type !== "income") {
+    return false;
+  }
+  const linkedPlan = draft.planInstanceId ? snapshot.planInstances.find((plan) => plan.id === draft.planInstanceId) : undefined;
+  return Boolean(linkedPlan?.isMainSalaryEstimate);
+}
+
+function matchingProtectedExtraIncomeAllocations(draft: TransactionDraft, snapshot: BluehourSnapshot): ExtraIncomeAllocation[] {
+  if (draft.type !== "transfer" || !draft.toAccountId) {
+    return [];
+  }
+
+  const destinationAccount = snapshot.accounts.find((account) => account.id === draft.toAccountId && isActive(account));
+  if (destinationAccount?.role !== "protected") {
+    return [];
+  }
+
+  return snapshot.extraIncomeAllocations
+    .filter(
+      (allocation) =>
+        isActive(allocation) &&
+        allocation.status === "pending_transfer" &&
+        allocation.protectedMinor === draft.amountMinor &&
+        (!allocation.protectedAccountId || allocation.protectedAccountId === draft.toAccountId)
+    )
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function ProtectedTransferLinkPanel({
+  allocations,
+  transactions,
+  accounts,
+  transferTransactionId,
+  onLink,
+  onDismiss
+}: {
+  allocations: ExtraIncomeAllocation[];
+  transactions: Transaction[];
+  accounts: Array<{ id: string; name: string }>;
+  transferTransactionId: string;
+  onLink: (allocation: ExtraIncomeAllocation) => Promise<void>;
+  onDismiss: () => void;
+}) {
+  if (allocations.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="dashboard-band" aria-label="Protected transfer link">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Protected transfer</p>
+          <h2>Link extra income transfer</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        {allocations.map((allocation) => {
+          const income = transactions.find((transaction) => transaction.id === allocation.incomeTransactionId);
+          const accountName = allocation.protectedAccountId ? accounts.find((account) => account.id === allocation.protectedAccountId)?.name : undefined;
+          return (
+            <div className="stack-row" key={allocation.id}>
+              <span>
+                <strong>{income?.description ?? "Extra income allocation"}</strong>
+                <small>
+                  {accountName ? `${accountName} · ` : ""}
+                  transfer {transferTransactionId.slice(0, 12)}
+                </small>
+              </span>
+              <Amount value={allocation.protectedMinor} />
+              <button className="primary-action" type="button" onClick={() => void onLink(allocation)}>
+                Confirm link
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="form-actions">
+        <button className="secondary-action" type="button" onClick={onDismiss}>
+          Skip linking
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ExtraIncomeAllocationBacklog({
+  allocations,
+  transactions,
+  accounts,
+  onEdit
+}: {
+  allocations: ExtraIncomeAllocation[];
+  transactions: Transaction[];
+  accounts: Array<{ id: string; name: string }>;
+  onEdit: (allocation: ExtraIncomeAllocation) => void;
+}) {
+  if (allocations.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="dashboard-band" aria-label="Extra income decisions">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Extra income</p>
+          <h2>Open allocation decisions</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        {allocations.map((allocation) => {
+          const income = transactions.find((transaction) => transaction.id === allocation.incomeTransactionId);
+          const protectedAccount = allocation.protectedAccountId ? accounts.find((account) => account.id === allocation.protectedAccountId)?.name : undefined;
+          return (
+            <div className="stack-row" key={allocation.id}>
+              <span>
+                <strong>{income?.description ?? "Extra income"}</strong>
+                <small>
+                  {allocation.status.replace("_", " ")} · available RM{(allocation.availableMinor / 100).toFixed(2)} · protected RM
+                  {(allocation.protectedMinor / 100).toFixed(2)}
+                  {protectedAccount ? ` · ${protectedAccount}` : ""}
+                </small>
+              </span>
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => onEdit(allocation)}
+                aria-label={`Edit ${income?.description ?? "extra income"} decision`}
+              >
+                Edit decision
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ExtraIncomeAllocationPanel({
+  allocation,
+  protectedAccounts,
+  onSave,
+  onCancel,
+  cancelActionLabel = "Decide later"
+}: {
+  allocation: { transactionId: string; amountMinor: number; budgetCycleId?: string; existingAllocation?: ExtraIncomeAllocation };
+  protectedAccounts: Array<{ id: string; name: string }>;
+  onSave: (record: ExtraIncomeAllocation) => Promise<void>;
+  onCancel: () => void;
+  cancelActionLabel?: string;
+}) {
+  const [choice, setChoice] = useState<"available" | "protected" | "manual" | "defer">(() => initialExtraIncomeChoice(allocation.existingAllocation));
+  const [available, setAvailable] = useState(((allocation.existingAllocation?.availableMinor ?? allocation.amountMinor) / 100).toFixed(2));
+  const [protectedAmount, setProtectedAmount] = useState(((allocation.existingAllocation?.protectedMinor ?? 0) / 100).toFixed(2));
+  const [protectedAccountId, setProtectedAccountId] = useState(allocation.existingAllocation?.protectedAccountId ?? protectedAccounts[0]?.id ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const availableMinor =
+        choice === "available" || choice === "defer"
+          ? allocation.amountMinor
+          : choice === "protected"
+            ? 0
+            : parseMoneyInput(available);
+      const protectedMinor =
+        choice === "available" || choice === "defer"
+          ? 0
+          : choice === "protected"
+            ? allocation.amountMinor
+            : parseMoneyInput(protectedAmount);
+      const draft: ExtraIncomeAllocationDraft = {
+        incomeTransactionId: allocation.transactionId,
+        budgetCycleId: allocation.budgetCycleId,
+        incomeAmountMinor: allocation.amountMinor,
+        availableMinor,
+        protectedMinor,
+        protectedAccountId: protectedMinor > 0 ? protectedAccountId || undefined : undefined,
+        status: choice === "defer" ? "deferred" : undefined
+      };
+      await onSave(
+        allocation.existingAllocation ? updateExtraIncomeAllocation(allocation.existingAllocation, draft) : createExtraIncomeAllocation(draft)
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not allocate extra income");
+    }
+  }
+
+  return (
+    <section className="dashboard-band" aria-label="Extra income allocation">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Extra income</p>
+          <h2>Allocate received income</h2>
+        </div>
+        <Amount value={allocation.amountMinor} />
+      </div>
+      <form className="form-grid" onSubmit={submit}>
+        <fieldset className="span-3 segmented-field">
+          <legend>How should this extra income be allocated?</legend>
+          {[
+            ["available", "Make all available"],
+            ["protected", "Protect all"],
+            ["manual", "Split manually"],
+            ["defer", "Decide later"]
+          ].map(([value, label]) => (
+            <label className="checkbox-label compact" key={value}>
+              <input type="radio" name="extra-income-choice" value={value} checked={choice === value} onChange={() => setChoice(value as typeof choice)} />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        {choice === "manual" ? (
+          <>
+            <label>
+              Available
+              <input value={available} onChange={(event) => setAvailable(event.target.value)} inputMode="decimal" />
+            </label>
+            <label>
+              Protected
+              <input value={protectedAmount} onChange={(event) => setProtectedAmount(event.target.value)} inputMode="decimal" />
+            </label>
+          </>
+        ) : null}
+        {choice === "protected" || choice === "manual" ? (
+          <label>
+            Protected account
+            <select value={protectedAccountId} onChange={(event) => setProtectedAccountId(event.target.value)}>
+              <option value="">Reserve without account</option>
+              {protectedAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+            <small>The transfer is still recorded separately. Pending protected income reduces safe-to-spend until linked.</small>
+          </label>
+        ) : null}
+        {choice === "defer" ? <p className="span-3">A Daily Review task will stay open until this decision is made.</p> : null}
+        {error ? <p className="form-error span-3">{error}</p> : null}
+        <div className="form-actions span-3">
+          <button className="secondary-action" type="button" onClick={onCancel}>
+            {cancelActionLabel}
+          </button>
+          <button className="primary-action" type="submit">
+            Save allocation
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function initialExtraIncomeChoice(allocation?: ExtraIncomeAllocation): "available" | "protected" | "manual" | "defer" {
+  if (!allocation) {
+    return "available";
+  }
+  if (allocation.status === "deferred") {
+    return "defer";
+  }
+  if (allocation.protectedMinor === 0) {
+    return "available";
+  }
+  if (allocation.availableMinor === 0) {
+    return "protected";
+  }
+  return "manual";
 }
 
 function RuleReviewPanel({

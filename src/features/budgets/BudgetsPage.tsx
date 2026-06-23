@@ -1,11 +1,11 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { ArrowRightLeft, Save } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
-import { assertBudgetTransferSourceAvailable, calculateCategoryAllocation } from "../../domain/budgets/calculations";
+import { assertBudgetTransferSourceAvailable } from "../../domain/budgets/calculations";
+import { buildBudgetProgressRows, type BudgetProgressRow as DomainBudgetProgressRow } from "../../domain/budgets/budgetProgress";
 import { formatDisplayDate } from "../../domain/dates";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import { calculateCategoryActuals } from "../../domain/transactions/calculations";
 import type { BudgetAllocation, BudgetTransfer, Category } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
@@ -46,18 +46,11 @@ export function BudgetsPage() {
       return [];
     }
 
-    return snapshot.categories
-      .filter((category) => isActive(category) && category.active && category.reservationMode !== "none")
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((category) => {
+    return buildBudgetProgressRows({ snapshot, cycle: activeCycle, asOfDate }).map((progress) => {
         const allocation = snapshot.budgetAllocations.find(
-          (item) => isActive(item) && item.budgetCycleId === activeCycle.id && item.categoryId === category.id
+          (item) => isActive(item) && item.budgetCycleId === activeCycle.id && item.categoryId === progress.categoryId
         );
-        const allocated = calculateCategoryAllocation(category.id, activeCycle, snapshot.budgetAllocations, snapshot.budgetTransfers);
-        const spent = calculateCategoryActuals(category.id, snapshot.transactions, snapshot.transactionSplits, activeCycle.startedOn, asOfDate);
-        const remaining = allocated - spent;
-        const percentage = allocated > 0 ? Math.min(999, Math.round((spent * 100) / allocated)) : 0;
-        return { category, allocation, allocated, spent, remaining, percentage };
+        return { ...progress, allocation };
       });
   }, [snapshot, activeCycle, asOfDate]);
 
@@ -102,6 +95,9 @@ export function BudgetsPage() {
         <button className="secondary-action" type="button" onClick={() => setCoachOpen((open) => !open)}>
           Review with Budget Coach
         </button>
+        <a className="secondary-action" href="#/settings#categories">
+          Manage categories
+        </a>
       </div>
 
       {message ? <section className="alert-band">{message}</section> : null}
@@ -179,7 +175,7 @@ export function BudgetsPage() {
       <BudgetTransferForm
         cycleId={cycle.id}
         categories={snapshot.categories.filter((category) => isActive(category) && category.nature === "discretionary")}
-        sourceAvailability={Object.fromEntries(rows.map((row) => [row.category.id, Math.max(0, row.remaining)]))}
+        sourceAvailability={Object.fromEntries(rows.map((row) => [row.categoryId, Math.max(0, row.remainingAfterFuturePlansMinor)]))}
         onSave={async (transfer) => {
           await saveRecord("budgetTransfers", transfer, "budget transfer");
           setMessage("Budget transfer saved. No account transaction was created.");
@@ -193,12 +189,13 @@ export function BudgetsPage() {
             <h2>Cycle progress</h2>
           </div>
         </div>
-        <div className="data-table" role="region" aria-label="Budget allocations">
+        <div className="data-table budget-table" role="region" aria-label="Budget allocations">
           <div className="data-row header">
             <span>Category</span>
             <span>Mode</span>
             <span>Allocated</span>
             <span>Spent</span>
+            <span>Reserved</span>
             <span>Remaining</span>
             <span>Edit</span>
           </div>
@@ -218,26 +215,23 @@ function BudgetRow({
   row: {
     category: Category;
     allocation?: BudgetAllocation;
-    allocated: number;
-    spent: number;
-    remaining: number;
-    percentage: number;
-  };
+  } & DomainBudgetProgressRow;
   onSave: (allocation: BudgetAllocation | undefined, category: Category, amountText: string) => Promise<void>;
 }) {
-  const [amount, setAmount] = useState((row.allocated / 100).toFixed(2));
-  const state = row.remaining < 0 ? "overspent" : row.percentage >= 80 ? "near limit" : "on track";
+  const [amount, setAmount] = useState((row.allocationMinor / 100).toFixed(2));
+  const state = row.state.replace("_", " ");
 
   return (
     <div className={`data-row budget-state-${state.replace(" ", "-")}`}>
       <span>
-        <strong>{row.category.name}</strong>
+        <strong>{row.categoryName}</strong>
         <small>{state}</small>
       </span>
       <span>{row.category.reservationMode}</span>
-      <Amount value={row.allocated} />
-      <Amount value={row.spent} />
-      <Amount value={row.remaining} />
+      <Amount value={row.allocationMinor} />
+      <Amount value={row.spentMinor} />
+      <Amount value={row.reservedFuturePlansMinor} />
+      <Amount value={row.remainingAfterFuturePlansMinor} />
       <form className="inline-form" onSubmit={(event) => {
         event.preventDefault();
         void onSave(row.allocation, row.category, amount);

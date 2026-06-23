@@ -172,6 +172,17 @@ export interface Subscription extends RecordMeta {
   priceHistoryJson?: string;
 }
 
+export interface ExtraIncomeAllocation extends RecordMeta {
+  incomeTransactionId: string;
+  budgetCycleId?: string;
+  incomeAmountMinor: number;
+  availableMinor: number;
+  protectedMinor: number;
+  protectedAccountId?: string;
+  status: "available_only" | "pending_transfer" | "completed" | "deferred";
+  linkedTransferTransactionId?: string;
+}
+
 export interface CategorisationRule extends RecordMeta {
   name: string;
   priority: number;
@@ -335,6 +346,7 @@ export interface BluehourSnapshot {
   recurringRules: RecurringRule[];
   planInstances: PlanInstance[];
   subscriptions: Subscription[];
+  extraIncomeAllocations: ExtraIncomeAllocation[];
   categorisationRules: CategorisationRule[];
   importProfiles: ImportProfile[];
   importBatches: ImportBatch[];

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Download, Plus, RefreshCw, ShieldCheck, Trash2, Unlink, Upload } from "lucide-react";
+import { Download, Plus, RefreshCw, Save, ShieldCheck, Trash2, Unlink, Upload } from "lucide-react";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { decryptBackup, encryptBackup, type EncryptedBackupEnvelope } from "../../data/backup/encryptedBackup";
 import {
@@ -30,12 +30,13 @@ import {
 } from "../../data/google/googleSheetsAdapter";
 import { pushSnapshotToGoogleSheet } from "../../data/google/sheetSerialization";
 import type { LocalMutation, MutableStoreName } from "../../data/local-db/localDb";
+import { isSystemCategory, moveCategory, validateCategoryConfiguration } from "../../domain/categories/categoryManagement";
 import { startFirstSalaryCycle } from "../../domain/forecasting/cycleCommands";
 import { planRemoteSnapshotSync } from "../../data/sync/remoteSync";
 import { toCsv } from "../../domain/imports/csv";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import type { Account, AppSettings, BalanceSnapshot, BluehourSnapshot, ConflictRecord, SyncState } from "../../domain/types";
+import type { Account, AppSettings, BalanceSnapshot, BluehourSnapshot, Category, ConflictRecord, PlanInstance, RecurringRule, SyncState } from "../../domain/types";
 import { isActive } from "../../domain/types";
 import { readProfileManifest } from "../../domain/profileManifest";
 
@@ -104,6 +105,16 @@ export function SettingsPage() {
           onPushed={() => setMessage("Snapshot exported to Google Sheet with RAW values.")}
         />
       </section>
+
+      <CategoryManager
+        categories={snapshot.categories}
+        recurringRules={snapshot.recurringRules}
+        planInstances={snapshot.planInstances}
+        onSave={async (mutations) => {
+          await saveRecords(mutations, "category management");
+          setMessage("Category changes saved.");
+        }}
+      />
 
       {snapshot.budgetCycles.some((cycle) => cycle.status === "open") ? (
         <section className="dashboard-band">
@@ -406,6 +417,312 @@ function AccountForm({ date, onSave }: { date: string; onSave: (records: { accou
         </div>
       </form>
     </section>
+  );
+}
+
+function CategoryManager({
+  categories,
+  recurringRules,
+  planInstances,
+  onSave
+}: {
+  categories: Category[];
+  recurringRules: RecurringRule[];
+  planInstances: PlanInstance[];
+  onSave: (mutations: LocalMutation[]) => Promise<void>;
+}) {
+  const sorted = [...categories].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
+
+  async function createCategory(record: Category) {
+    await onSave([{ storeName: "categories", record }]);
+  }
+
+  async function saveCategory(category: Category) {
+    const validation = validateCategoryConfiguration(category);
+    if (!validation.valid) {
+      throw new Error(validation.error ?? "Category configuration is invalid.");
+    }
+    await onSave([{ storeName: "categories", record: category }]);
+  }
+
+  async function reorder(categoryId: string, direction: "up" | "down") {
+    const now = new Date().toISOString();
+    const reordered = moveCategory(categories, categoryId, direction, now);
+    const mutations = reordered
+      .filter((category) => category.sortOrder !== categories.find((existing) => existing.id === category.id)?.sortOrder)
+      .map((record) => ({ storeName: "categories" as const, record }));
+    await onSave(mutations);
+  }
+
+  return (
+    <section className="dashboard-band" id="categories">
+      <div className="band-header">
+        <div>
+          <p className="eyebrow">Taxonomy</p>
+          <h2>Category manager</h2>
+        </div>
+      </div>
+      <div className="stack-list">
+        <div className="stack-row">
+          <span>
+            <strong>Reservation modes</strong>
+            <small>
+              plan reserves dated obligations, envelope reserves salary-cycle allocations, protected reserves transfers to protected accounts, and none is for administrative records.
+            </small>
+          </span>
+        </div>
+      </div>
+      <CategoryCreateForm onCreate={createCategory} />
+      <div className="data-table category-table" role="region" aria-label="Categories">
+        <div className="data-row header">
+          <span>Category</span>
+          <span>Group</span>
+          <span>Nature</span>
+          <span>Mode</span>
+          <span>Status</span>
+          <span>Order</span>
+          <span>Action</span>
+        </div>
+        {sorted.map((category) => (
+          <CategoryManagerRow
+            key={category.id}
+            category={category}
+            categories={sorted}
+            recurringRules={recurringRules}
+            planInstances={planInstances}
+            onSave={saveCategory}
+            onReorder={reorder}
+            onBulkSave={onSave}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CategoryCreateForm({ onCreate }: { onCreate: (category: Category) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [group, setGroup] = useState<Category["group"]>("discretionary");
+  const [nature, setNature] = useState<Category["nature"]>("discretionary");
+  const [reservationMode, setReservationMode] = useState<Category["reservationMode"]>("envelope");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      const category: Category = {
+        ...createRecordMeta("cat"),
+        name: name.trim(),
+        group,
+        nature,
+        reservationMode,
+        sortOrder: Date.now(),
+        active: true
+      };
+      const validation = validateCategoryConfiguration(category);
+      if (!validation.valid) {
+        throw new Error(validation.error ?? "Category configuration is invalid.");
+      }
+      await onCreate(category);
+      setName("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create category");
+    }
+  }
+
+  return (
+    <form className="form-grid dashboard-subsection" onSubmit={submit}>
+      <label>
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} required />
+      </label>
+      <CategoryGroupSelect value={group} onChange={setGroup} />
+      <CategoryNatureSelect value={nature} onChange={setNature} />
+      <ReservationModeSelect value={reservationMode} onChange={setReservationMode} />
+      {error ? <p className="form-error span-3">{error}</p> : null}
+      <div className="form-actions span-3">
+        <button className="primary-action" type="submit">
+          <Plus size={16} aria-hidden="true" />
+          Create category
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CategoryManagerRow({
+  category,
+  categories,
+  recurringRules,
+  planInstances,
+  onSave,
+  onReorder,
+  onBulkSave
+}: {
+  category: Category;
+  categories: Category[];
+  recurringRules: RecurringRule[];
+  planInstances: PlanInstance[];
+  onSave: (category: Category) => Promise<void>;
+  onReorder: (categoryId: string, direction: "up" | "down") => Promise<void>;
+  onBulkSave: (mutations: LocalMutation[]) => Promise<void>;
+}) {
+  const [name, setName] = useState(category.name);
+  const [group, setGroup] = useState(category.group);
+  const [nature, setNature] = useState(category.nature);
+  const [reservationMode, setReservationMode] = useState(category.reservationMode);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [archiveAffected, setArchiveAffected] = useState(false);
+  const [reassignCategoryId, setReassignCategoryId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const system = isSystemCategory(category.id);
+  const activeAffectedRules = recurringRules.filter((rule) => isActive(rule) && rule.active && rule.categoryId === category.id);
+  const activeAffectedPlans = planInstances.filter((plan) => isActive(plan) && plan.status === "scheduled" && plan.categoryId === category.id);
+  const affectedCount = activeAffectedRules.length + activeAffectedPlans.length;
+  const validation = validateCategoryConfiguration({ group, nature, reservationMode });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      if (!validation.valid) {
+        throw new Error(validation.error ?? "Category configuration is invalid.");
+      }
+      await onSave({
+        ...touchRecord(category),
+        name: name.trim(),
+        group,
+        nature,
+        reservationMode
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save category");
+    }
+  }
+
+  async function archiveOrRestore() {
+    setError(null);
+    try {
+      const now = new Date().toISOString();
+      if (isActive(category)) {
+        if (system) {
+          throw new Error("System categories cannot be archived.");
+        }
+        if (!confirmArchive) {
+          throw new Error("Confirm archive before hiding this category.");
+        }
+        if (affectedCount > 0 && !archiveAffected && !reassignCategoryId) {
+          throw new Error("Choose whether to archive or reassign active future rules and plans.");
+        }
+        const mutations: LocalMutation[] = [
+          { storeName: "categories", record: { ...touchRecord(category), active: false, archivedAt: now } }
+        ];
+        if (archiveAffected) {
+          activeAffectedRules.forEach((rule) => mutations.push({ storeName: "recurringRules", record: { ...touchRecord(rule), active: false } }));
+          activeAffectedPlans.forEach((plan) => mutations.push({ storeName: "planInstances", record: { ...touchRecord(plan), status: "archived", archivedAt: now } }));
+        } else if (reassignCategoryId) {
+          activeAffectedRules.forEach((rule) => mutations.push({ storeName: "recurringRules", record: { ...touchRecord(rule), categoryId: reassignCategoryId } }));
+          activeAffectedPlans.forEach((plan) => mutations.push({ storeName: "planInstances", record: { ...touchRecord(plan), categoryId: reassignCategoryId } }));
+        }
+        await onBulkSave(mutations);
+        return;
+      }
+
+      await onSave({ ...touchRecord(category), active: true, archivedAt: null });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update archive state");
+    }
+  }
+
+  return (
+    <form className="data-row" onSubmit={submit}>
+      <span>
+        <input value={name} onChange={(event) => setName(event.target.value)} aria-label={`${category.name} name`} />
+        <small>{category.id}</small>
+      </span>
+      <CategoryGroupSelect value={group} onChange={setGroup} disabled={system} />
+      <CategoryNatureSelect value={nature} onChange={setNature} disabled={system} />
+      <ReservationModeSelect value={reservationMode} onChange={setReservationMode} disabled={system} />
+      <span>
+        {isActive(category) ? "active" : "archived"}
+        {validation.warning ? <small>{validation.warning}</small> : null}
+      </span>
+      <span className="inline-actions">
+        <button className="secondary-action" type="button" onClick={() => void onReorder(category.id, "up")}>
+          Move up
+        </button>
+        <button className="secondary-action" type="button" onClick={() => void onReorder(category.id, "down")}>
+          Move down
+        </button>
+      </span>
+      <span className="category-actions">
+        <button className="icon-button" type="submit" aria-label={`Save ${category.name}`}>
+          <Save size={15} aria-hidden="true" />
+        </button>
+        {!system ? (
+          <>
+            <label className="checkbox-label compact">
+              <input type="checkbox" checked={confirmArchive} onChange={(event) => setConfirmArchive(event.target.checked)} />
+              Confirm
+            </label>
+            <label className="checkbox-label compact">
+              <input type="checkbox" checked={archiveAffected} onChange={(event) => setArchiveAffected(event.target.checked)} />
+              Archive future
+            </label>
+            <select value={reassignCategoryId} onChange={(event) => setReassignCategoryId(event.target.value)} aria-label={`Reassign ${category.name} future records`}>
+              <option value="">No reassignment</option>
+              {categories
+                .filter((candidate) => candidate.id !== category.id && isActive(candidate))
+                .map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </option>
+                ))}
+            </select>
+            <button className="secondary-action" type="button" onClick={() => void archiveOrRestore()}>
+              {isActive(category) ? "Archive" : "Restore"}
+            </button>
+          </>
+        ) : null}
+        {affectedCount > 0 ? <small>{affectedCount} active future reference{affectedCount === 1 ? "" : "s"}</small> : null}
+        {error ? <small className="form-error">{error}</small> : null}
+      </span>
+    </form>
+  );
+}
+
+function CategoryGroupSelect({ value, onChange, disabled = false }: { value: Category["group"]; onChange: (value: Category["group"]) => void; disabled?: boolean }) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as Category["group"])} disabled={disabled} aria-label="Category group">
+      <option value="committed">committed</option>
+      <option value="essential_flexible">essential flexible</option>
+      <option value="discretionary">discretionary</option>
+      <option value="protected">protected</option>
+      <option value="administrative">administrative</option>
+    </select>
+  );
+}
+
+function CategoryNatureSelect({ value, onChange, disabled = false }: { value: Category["nature"]; onChange: (value: Category["nature"]) => void; disabled?: boolean }) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as Category["nature"])} disabled={disabled} aria-label="Category nature">
+      <option value="essential">essential</option>
+      <option value="discretionary">discretionary</option>
+      <option value="protected">protected</option>
+      <option value="administrative">administrative</option>
+    </select>
+  );
+}
+
+function ReservationModeSelect({ value, onChange, disabled = false }: { value: Category["reservationMode"]; onChange: (value: Category["reservationMode"]) => void; disabled?: boolean }) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value as Category["reservationMode"])} disabled={disabled} aria-label="Reservation mode">
+      <option value="plan">plan</option>
+      <option value="envelope">envelope</option>
+      <option value="protected">protected</option>
+      <option value="none">none</option>
+    </select>
   );
 }
 

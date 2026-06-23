@@ -13,7 +13,7 @@ lastModifiedByClientId?
 
 ## IndexedDB Schema
 
-Current IndexedDB schema version: `4`.
+Current IndexedDB schema version: `5`.
 
 Profile databases contain:
 
@@ -29,6 +29,7 @@ Profile databases contain:
 - `recurringRules`
 - `planInstances`
 - `subscriptions`
+- `extraIncomeAllocations`
 - `categorisationRules`
 - `importProfiles`
 - `importBatches`
@@ -62,9 +63,11 @@ The device ID is generated with `crypto.randomUUID()`. It is not derived from ha
 
 ## Demo Fixture Version
 
-Current demo fixture version: `v1-local-demo-v4`.
+Current demo fixture version: `v1-local-demo-v5`.
 
 A fixture version change does not clear mutable profile data. Demo reset is explicit and affects only `bluehour-profile-demo`.
+
+Schema v5 adds `extraIncomeAllocations` and performs a non-destructive starter-category taxonomy reconciliation. Existing live categories are repaired or added where needed, archived categories stay archived, and changed live records enter the outbox. A blank live profile remains locally saved without generating category sync noise.
 
 ## Backup Schema
 
@@ -97,6 +100,49 @@ acceptedDecisions[]
 Recommendation results themselves are transient. Accepted category amounts become ordinary `BudgetAllocation` records and retain an approval note. This keeps backup, restore, Google Drive vault staging, optional Sheet export, and sync conflict handling on the existing Settings and BudgetAllocations paths without a schema version bump.
 
 Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
+
+## Category Taxonomy
+
+Starter categories are durable records with stable IDs. RC2 reconciles missing or outdated starter taxonomy records for fixed transport, tolls and parking, personal care, hobbies, gifts, miscellaneous, planned major payments, bank fees, and taxes. Discretionary categories use envelope reservation mode by default.
+
+Category management validates group, nature, and reservation-mode combinations before records are saved. System categories can be renamed or moved where allowed, but they cannot be archived.
+
+## Budget Progress
+
+Budget progress is derived, not stored. The shared model reads active category allocations, transaction splits, and scheduled plan instances for a cycle, then reports:
+
+```text
+allocationMinor
+spentMinor
+reservedFuturePlansMinor
+remainingBeforeFuturePlansMinor
+remainingAfterFuturePlansMinor
+percentageUsedOrReserved
+state
+```
+
+Transfers and archived records are excluded from spending. Future reserved plans remain visible so Overview and Budgets agree about what is already committed.
+
+## Extra Income Allocations
+
+Extra income decisions are stored in `extraIncomeAllocations`:
+
+```text
+incomeTransactionId
+budgetCycleId?
+incomeAmountMinor
+availableMinor
+protectedMinor
+protectedAccountId?
+status: available_only | pending_transfer | completed | deferred
+linkedTransferTransactionId?
+```
+
+Pending protected allocations reduce safe-to-spend for the matching salary cycle until the user records and confirms the protected transfer link. Deferred allocations appear in Daily Review.
+
+## Subscriptions
+
+Subscriptions keep provider metadata, billing cadence, next payment date, optional annual renewal date, optional cancellation deadline, essential flag, notes, and optional price-history JSON. Monthly equivalents are derived with documented integer rounding and are not written back as stored money.
 
 ## Profile Manifest
 

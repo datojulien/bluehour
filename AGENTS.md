@@ -6,7 +6,7 @@ Bluehour is a single-user, MYR-only, Mac-first personal finance app for salary-c
 
 ## Architectural Invariants
 
-- Keep domain calculations independent of React, IndexedDB, and Google Sheets.
+- Keep domain calculations independent of React, IndexedDB, Google Drive, and Google Sheets adapters.
 - Use local IndexedDB as the working database and offline queue.
 - Keep demo and live profiles isolated in separate IndexedDB databases.
 - Treat `bluehour-local` as legacy data. Do not clear or migrate it silently.
@@ -47,5 +47,6 @@ npm run test:e2e
 ## Current Cautions
 
 - The app is not labelled production-ready or versioned `1.0.0`.
+- Current release-candidate target is `1.0.0-rc.2`; IndexedDB schema is v5 and optional Google Sheet schema is v4.
 - Google OAuth and live Drive app-data vault sync are tested with mocks only; real deployed-origin verification remains a manual release gate.
 - Remaining stable-release gates are documented in `PRODUCTION_READINESS.md` and `docs/RC_CHECKLIST.md`.

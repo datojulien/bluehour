@@ -19,7 +19,7 @@ describe("Bluehour application state", () => {
   it("resumes manifest onboarding when a stale live shell has no open salary cycle", () => {
     const manifest = createProfileManifest({
       now,
-      appVersion: "1.0.0-rc.1",
+      appVersion: "1.0.0-rc.2",
       lifecycle: "setup",
       onboardingStep: "preferences"
     });
@@ -34,7 +34,7 @@ describe("Bluehour application state", () => {
   it("sends an invalid live profile without an open cycle back to the first-cycle step", () => {
     const manifest = createProfileManifest({
       now,
-      appVersion: "1.0.0-rc.1",
+      appVersion: "1.0.0-rc.2",
       lifecycle: "live"
     });
     const snapshot = emptySnapshot([profileManifestSettingRecord([], manifest)]);
@@ -108,6 +108,7 @@ function emptySnapshot(settings: AppSettings[] = []): BluehourSnapshot {
     recurringRules: [],
     planInstances: [],
     subscriptions: [],
+    extraIncomeAllocations: [],
     categorisationRules: [],
     importProfiles: [],
     importBatches: [],
