@@ -21,6 +21,7 @@ import {
   buildBudgetCoachInputForCycle,
   readBudgetCoachPreferences
 } from "../budgets/budgetCoachSettings";
+import { GeminiCycleReportPanel, type SelectedGeminiNextBudgetPlan } from "./GeminiCycleReportPanel";
 
 interface ChecklistItem {
   id: string;
@@ -29,8 +30,9 @@ interface ChecklistItem {
 }
 
 export function ReviewPage() {
-  const { snapshot, asOfDate, loading, error, saveRecord, saveRecords } = useBluehourData();
+  const { snapshot, asOfDate, loading, error, isDemo, saveRecord, saveRecords } = useBluehourData();
   const [message, setMessage] = useState<string | null>(null);
+  const [geminiNextBudgetPlan, setGeminiNextBudgetPlan] = useState<SelectedGeminiNextBudgetPlan | null>(null);
 
   const balances = useMemo(
     () =>
@@ -386,6 +388,18 @@ export function ReviewPage() {
       ) : null}
 
       {activeCycle ? (
+        <GeminiCycleReportPanel
+          snapshot={snapshot}
+          cycle={activeCycle}
+          asOfDate={asOfDate}
+          isDemo={isDemo}
+          selectedPlan={geminiNextBudgetPlan}
+          onSelectNextBudget={setGeminiNextBudgetPlan}
+          onClearNextBudget={() => setGeminiNextBudgetPlan(null)}
+        />
+      ) : null}
+
+      {activeCycle ? (
         <CycleClosePanel
           cycle={activeCycle}
           accounts={activeAccounts}
@@ -397,6 +411,8 @@ export function ReviewPage() {
           transactionSplits={snapshot.transactionSplits.filter(isActive)}
           cycleCloseReview={cycleCloseReview}
           reconciliationComplete={reconciliationComplete}
+          nextBudgetSourceLabel={geminiNextBudgetPlan ? `Gemini proposal from ${geminiNextBudgetPlan.model}` : undefined}
+          onClearNextBudgetSource={() => setGeminiNextBudgetPlan(null)}
           onCreateCycleCloseReview={() => createCycleCloseReview(activeCycle)}
           onToggleCycleCloseItem={(itemId) => {
             if (cycleCloseReview) {
@@ -404,6 +420,14 @@ export function ReviewPage() {
             }
           }}
           onClose={async (result) => {
+            const nextAllocations = geminiNextBudgetPlan
+              ? allocationsForNextCycleWithGeminiProposal({
+                  clonedAllocations: result.nextAllocations,
+                  newCycleId: result.newCycle.id,
+                  categories: snapshot.categories,
+                  plan: geminiNextBudgetPlan
+                })
+              : result.nextAllocations;
             await saveRecords(
               [
                 { storeName: "budgetCycles", record: result.closedCycle },
@@ -411,11 +435,16 @@ export function ReviewPage() {
                 { storeName: "transactions", record: result.salaryTransaction },
                 { storeName: "transactionLegs", record: result.salaryLeg },
                 { storeName: "transactionSplits", record: result.salarySplit },
-                ...result.nextAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record }))
+                ...nextAllocations.map((record) => ({ storeName: "budgetAllocations" as const, record }))
               ],
               "salary cycle close"
             );
-            setMessage("Salary cycle closed and the next cycle budget template was created.");
+            setGeminiNextBudgetPlan(null);
+            setMessage(
+              geminiNextBudgetPlan
+                ? "Salary cycle closed and the Gemini next-cycle budget proposal was applied."
+                : "Salary cycle closed and the next cycle budget template was created."
+            );
           }}
         />
       ) : null}
@@ -504,6 +533,8 @@ function CycleClosePanel({
   transactionSplits,
   cycleCloseReview,
   reconciliationComplete,
+  nextBudgetSourceLabel,
+  onClearNextBudgetSource,
   onCreateCycleCloseReview,
   onToggleCycleCloseItem,
   onClose
@@ -518,6 +549,8 @@ function CycleClosePanel({
   transactionSplits: TransactionSplit[];
   cycleCloseReview?: ReviewSession;
   reconciliationComplete: boolean;
+  nextBudgetSourceLabel?: string;
+  onClearNextBudgetSource: () => void;
   onCreateCycleCloseReview: () => Promise<void>;
   onToggleCycleCloseItem: (itemId: string) => void;
   onClose: (result: ReturnType<typeof closeSalaryCycleWithActualSalary>) => Promise<void>;
@@ -581,6 +614,14 @@ function CycleClosePanel({
           <h2>Close current cycle</h2>
         </div>
       </div>
+      {nextBudgetSourceLabel ? (
+        <div className="alert-band">
+          <span>{nextBudgetSourceLabel} will replace matching next-cycle allocations when this cycle closes.</span>
+          <button className="secondary-action" type="button" onClick={onClearNextBudgetSource}>
+            Use copied template instead
+          </button>
+        </div>
+      ) : null}
       <div className="stack-list">
         <div className="stack-row">
           <span>
@@ -837,6 +878,63 @@ function cycleCloseChecklistItems(): ChecklistItem[] {
     { id: "protected", label: "Confirm protected contribution", complete: false },
     { id: "backup", label: "Download or confirm backup", complete: false }
   ];
+}
+
+function allocationsForNextCycleWithGeminiProposal({
+  clonedAllocations,
+  newCycleId,
+  categories,
+  plan
+}: {
+  clonedAllocations: readonly BudgetAllocation[];
+  newCycleId: string;
+  categories: readonly Category[];
+  plan: SelectedGeminiNextBudgetPlan;
+}): BudgetAllocation[] {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const allocatableCategoryIds = new Set(
+    categories
+      .filter(
+        (category) =>
+          isActive(category) &&
+          category.active &&
+          category.nature !== "administrative" &&
+          category.nature !== "protected" &&
+          category.reservationMode !== "none"
+      )
+      .map((category) => category.id)
+  );
+  const byCategory = new Map(clonedAllocations.map((allocation) => [allocation.categoryId, allocation]));
+  const note = `Accepted Gemini ${plan.model} next-cycle proposal during salary-cycle close.`;
+
+  for (const recommendation of plan.recommendations) {
+    if (!allocatableCategoryIds.has(recommendation.categoryId)) {
+      continue;
+    }
+    const existing = byCategory.get(recommendation.categoryId);
+    byCategory.set(
+      recommendation.categoryId,
+      existing
+        ? {
+            ...existing,
+            baseAmountMinor: recommendation.amountMinor,
+            note
+          }
+        : {
+            ...createRecordMeta("alloc"),
+            budgetCycleId: newCycleId,
+            categoryId: recommendation.categoryId,
+            baseAmountMinor: recommendation.amountMinor,
+            note
+          }
+    );
+  }
+
+  return [...byCategory.values()].sort((left, right) => {
+    const leftCategory = categoryById.get(left.categoryId);
+    const rightCategory = categoryById.get(right.categoryId);
+    return (leftCategory?.sortOrder ?? 9999) - (rightCategory?.sortOrder ?? 9999) || (leftCategory?.name ?? left.categoryId).localeCompare(rightCategory?.name ?? right.categoryId);
+  });
 }
 
 function parseMoneyInputSafe(value: string): number {

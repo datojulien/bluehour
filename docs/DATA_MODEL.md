@@ -105,6 +105,12 @@ Recommendation results themselves are transient. Accepted category amounts becom
 
 Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
 
+## Gemini Cycle Report
+
+Gemini cycle reports do not add an IndexedDB store, Drive vault file, Google Sheet tab, or durable settings key. The report payload and response are transient browser state on the Review page. A user-entered Gemini API key is not stored by Bluehour.
+
+When the user selects a Gemini next-cycle proposal and then completes salary-cycle close, the accepted category amounts become ordinary `BudgetAllocation` records for the newly created cycle. The close flow preserves copied allocations for categories not present in the Gemini proposal. Gemini cannot create budget transfers, categorisation rules, reconciliation adjustments, buffer changes, subscriptions, plans, goals, or bank transactions.
+
 ## Category Taxonomy
 
 Starter categories are durable records with stable IDs. RC2 reconciles missing or outdated starter taxonomy records for fixed transport, tolls and parking, personal care, hobbies, gifts, miscellaneous, planned major payments, bank fees, and taxes. Discretionary categories use envelope reservation mode by default.
