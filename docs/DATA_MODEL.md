@@ -105,9 +105,11 @@ Recommendation results themselves are transient. Accepted category amounts becom
 
 Budget Coach amounts remain integer sen. Percentages are calculated as integer basis points. Historical category evidence uses up to the last six closed salary cycles and integer-safe medians; even-count medians round to the nearest sen.
 
-## Gemini Cycle Report
+## Gemini Budget Setup And Cycle Report
 
-Gemini cycle reports do not add an IndexedDB store, Drive vault file, Google Sheet tab, or durable settings key. The report payload and response are transient browser state on the Review page. A user-entered Gemini API key is not stored by Bluehour.
+Gemini first-cycle setup and cycle reports do not add an IndexedDB store, Drive vault file, Google Sheet tab, or durable API-key setting. The Gemini API key, request payload, and response are transient browser state.
+
+During onboarding, accepting a Gemini first-cycle setup proposal writes only the existing `onboardingBudgetTemplate` setting. The first salary-cycle start later turns that template into ordinary `BudgetAllocation` records. The setup helper preserves the existing first-cycle boundary flow and cannot create salary cycles, bank transactions, plans, goals, transfers, reconciliation adjustments, categorisation rules, or buffer changes.
 
 When the user selects a Gemini next-cycle proposal and then completes salary-cycle close, the accepted category amounts become ordinary `BudgetAllocation` records for the newly created cycle. The close flow preserves copied allocations for categories not present in the Gemini proposal. Gemini cannot create budget transfers, categorisation rules, reconciliation adjustments, buffer changes, subscriptions, plans, goals, or bank transactions.
 

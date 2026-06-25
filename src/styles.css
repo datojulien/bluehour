@@ -2006,6 +2006,12 @@ input[type="date"] {
     justify-content: flex-start;
   }
 
+  .gemini-report-panel .primary-action {
+    width: auto;
+    padding: 0 14px;
+    justify-content: flex-start;
+  }
+
   .page-header {
     display: grid;
   }

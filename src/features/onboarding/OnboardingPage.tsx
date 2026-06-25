@@ -27,6 +27,7 @@ import {
   readBudgetCoachPreferences,
   recommendedProfileForOnboarding
 } from "../budgets/budgetCoachSettings";
+import { GeminiBudgetSetupPanel } from "./GeminiBudgetSetupPanel";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -67,6 +68,10 @@ export function OnboardingPage() {
     const stored = readBudgetCoachPreferences(snapshot?.settings ?? [], categories);
     return snapshot ? recommendedProfileForOnboarding(snapshot, asOfDate, stored) : stored;
   }, [asOfDate, categories, snapshot]);
+  const onboardingBudgetInput = useMemo(
+    () => (snapshot ? onboardingBudgetCoachInput(snapshot, asOfDate, budgetCoachPreferences) : null),
+    [asOfDate, budgetCoachPreferences, snapshot]
+  );
   const profileHealth = useMemo(() => {
     if (!snapshot) {
       return null;
@@ -308,44 +313,64 @@ export function OnboardingPage() {
         ) : null}
 
         {currentStep === "budget" ? (
-          <BudgetCoachPanel
-            title="Guided first salary-cycle budget"
-            input={onboardingBudgetCoachInput(snapshot, asOfDate, budgetCoachPreferences)}
-            categories={categories}
-            preferences={budgetCoachPreferences}
-            canApply
-            applyLabel="Accept suggested budget"
-            onReturnToIncome={() => void setOnboardingStep("income")}
-            onReturnToObligations={() => void setOnboardingStep("obligations")}
-            onPreferencesChange={async (preferences) => {
-              await saveRecords(
-                [{ storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, preferences) }],
-                "Budget Coach preferences"
-              );
-              setMessage("Budget Coach preferences saved.");
-            }}
-            onAcceptAll={async (result, preferences) => {
-              const acceptedPreferences = appendBudgetCoachDecision({
-                preferences,
-                result,
-                appliedCategoryIds: result.categoryRecommendations.map((recommendation) => recommendation.categoryId)
-              });
-              const template = budgetTemplateSettingFromRecommendation(
-                result.categoryRecommendations,
-                snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")
-              );
-              await saveRecordsAndAdvanceOnboarding(
-                [
-                  { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, acceptedPreferences) },
-                  { storeName: "settings", record: template }
-                ],
-                "wait_salary",
-                "setup",
-                "onboarding budget coach"
-              );
-              setMessage("Budget Coach saved the accepted first-cycle template.");
-            }}
-          />
+          <>
+            <BudgetCoachPanel
+              title="Guided first salary-cycle budget"
+              input={onboardingBudgetInput}
+              categories={categories}
+              preferences={budgetCoachPreferences}
+              canApply
+              applyLabel="Accept suggested budget"
+              onReturnToIncome={() => void setOnboardingStep("income")}
+              onReturnToObligations={() => void setOnboardingStep("obligations")}
+              onPreferencesChange={async (preferences) => {
+                await saveRecords(
+                  [{ storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, preferences) }],
+                  "Budget Coach preferences"
+                );
+                setMessage("Budget Coach preferences saved.");
+              }}
+              onAcceptAll={async (result, preferences) => {
+                const acceptedPreferences = appendBudgetCoachDecision({
+                  preferences,
+                  result,
+                  appliedCategoryIds: result.categoryRecommendations.map((recommendation) => recommendation.categoryId)
+                });
+                const template = budgetTemplateSettingFromRecommendation(
+                  result.categoryRecommendations,
+                  snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")
+                );
+                await saveRecordsAndAdvanceOnboarding(
+                  [
+                    { storeName: "settings", record: budgetCoachPreferenceRecord(snapshot.settings, categories, acceptedPreferences) },
+                    { storeName: "settings", record: template }
+                  ],
+                  "wait_salary",
+                  "setup",
+                  "onboarding budget coach"
+                );
+                setMessage("Budget Coach saved the accepted first-cycle template.");
+              }}
+            />
+            <GeminiBudgetSetupPanel
+              snapshot={snapshot}
+              input={onboardingBudgetInput}
+              asOfDate={asOfDate}
+              onAcceptBudget={async (items, model) => {
+                const template = budgetTemplateSettingFromRecommendation(
+                  items.map((item) => ({ categoryId: item.categoryId, suggestedAmountMinor: item.amountMinor })),
+                  snapshot.settings.find((setting) => setting.key === "onboardingBudgetTemplate")
+                );
+                await saveRecordsAndAdvanceOnboarding(
+                  [{ storeName: "settings", record: template }],
+                  "wait_salary",
+                  "setup",
+                  "Gemini onboarding budget setup"
+                );
+                setMessage(`Gemini ${model} saved the accepted first-cycle template.`);
+              }}
+            />
+          </>
         ) : null}
 
         {currentStep === "wait_salary" ? (

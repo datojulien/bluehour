@@ -249,11 +249,11 @@ If a profile target does not fit, Budget Coach may recommend the highest afforda
 
 Priority weights are Low 1, Normal 2, High 3. Essential categories are funded from minimum toward comfortable amounts before discretionary categories receive any pool. Completed salary cycles improve confidence from Estimated to Observed, then Reliable after three or more completed cycles.
 
-## Gemini Cycle Report
+## Gemini Budget Setup And Cycle Report
 
-The Review page includes an opt-in Gemini cycle report for live profiles. It sends a redacted salary-cycle payload to the selected Gemini model, asks for an educational financial report, and can stage a proposed next-cycle budget for salary-cycle close. The Gemini API key is entered per report and is not stored by Bluehour.
+The onboarding Budget step and Review page include opt-in Gemini helpers for live profiles. First-cycle setup sends redacted planned salary, account, obligation, category, and preference data to the selected Gemini model for a first-cycle envelope template. Cycle review sends a redacted salary-cycle payload, asks for an educational financial report, and can stage a proposed next-cycle budget for salary-cycle close. The Gemini API key is entered per request and is not stored by Bluehour.
 
-Gemini proposals do not change data on receipt. If the user selects a proposal and then completes salary-cycle close, Bluehour saves the selected category amounts as ordinary next-cycle budget allocations and preserves copied allocations for categories Gemini did not include.
+Gemini proposals do not change data on receipt. If the user accepts a first-cycle setup proposal, Bluehour saves the existing onboarding budget template and applies it only when the first salary cycle starts. If the user selects a cycle-review proposal and then completes salary-cycle close, Bluehour saves the selected category amounts as ordinary next-cycle budget allocations and preserves copied allocations for categories Gemini did not include.
 
 ## Backup And Restore
 
@@ -265,7 +265,7 @@ Settings also includes a guarded local reset for the live profile. It requires t
 
 - No analytics or telemetry.
 - No account numbers, card numbers, banking credentials, passwords, or Google OAuth client secrets are requested.
-- The optional Gemini cycle report asks for a Gemini API key per report and does not store it.
+- The optional Gemini helpers ask for a Gemini API key per request and do not store it.
 - Google tokens are never persisted.
 - Privacy mode visually obscures amounts only; it is not encryption.
 - Real financial data must never be committed to this repository.
