@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Archive, FileDown, Plus, RotateCcw, Upload } from "lucide-react";
+import { Archive, FileDown, Pencil, Plus, RotateCcw, Upload } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { findRuleProposals, matchesRule } from "../../domain/categorisation/rules";
@@ -22,7 +22,7 @@ import {
 import { rankDuplicateCandidates } from "../../domain/imports/importMatching";
 import { parseMoneyInput } from "../../domain/money";
 import { createRecordMeta, touchRecord } from "../../domain/records";
-import { createTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
+import { createTransactionRecords, editTransactionRecords, type SplitDraft, type TransactionDraft } from "../../domain/transactions/commands";
 import type {
   BluehourSnapshot,
   CategorisationRule,
@@ -70,6 +70,7 @@ export function TransactionsPage() {
     allocationIds: string[];
   } | null>(null);
   const [editingExtraIncomeId, setEditingExtraIncomeId] = useState<string | null>(null);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const openComposer = searchParams.get("new") === "1";
@@ -125,6 +126,7 @@ export function TransactionsPage() {
     .filter((allocation) => isActive(allocation) && allocation.status !== "completed")
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const editingExtraIncome = editingExtraIncomeId ? editableExtraIncomeAllocations.find((allocation) => allocation.id === editingExtraIncomeId) : undefined;
+  const editingTransaction = editingTransactionId ? allTransactions.find((transaction) => transaction.id === editingTransactionId) : undefined;
 
   async function handleImport(text: string, options: CsvImportOptions) {
     if (!snapshot) {
@@ -417,7 +419,14 @@ export function TransactionsPage() {
           <p className="eyebrow">Ledger</p>
           <h1>Transactions</h1>
         </div>
-        <button className="primary-action" type="button" onClick={() => setSearchParams({ new: "1" })}>
+        <button
+          className="primary-action"
+          type="button"
+          onClick={() => {
+            setEditingTransactionId(null);
+            setSearchParams({ new: "1" });
+          }}
+        >
           <Plus size={18} aria-hidden="true" />
           <span>Transaction</span>
         </button>
@@ -457,6 +466,40 @@ export function TransactionsPage() {
               }
             }
             setMessage("Transaction saved locally.");
+          }}
+        />
+      ) : null}
+
+      {editingTransaction ? (
+        <TransactionComposer
+          key={editingTransaction.id}
+          accounts={activeAccounts}
+          categories={activeCategories}
+          transactions={allTransactions}
+          defaultDate={asOfDate}
+          initialDraft={transactionDraftForEdit(editingTransaction, loadedSnapshot)}
+          heading="Edit transaction"
+          saveLabel="Save changes"
+          onCancel={() => setEditingTransactionId(null)}
+          onSave={async (draft) => {
+            const result = editTransactionRecords(editingTransaction, draft, loadedSnapshot);
+            await saveRecords(
+              [
+                { storeName: "transactions", record: result.transaction },
+                ...result.archivedLegs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+                ...result.archivedSplits.map((record) => ({ storeName: "transactionSplits" as const, record })),
+                ...result.legs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+                ...result.splits.map((record) => ({ storeName: "transactionSplits" as const, record }))
+              ],
+              "transaction edit"
+            );
+            setEditingTransactionId(null);
+            setMessage(
+              editingTransaction.type === "income" &&
+                loadedSnapshot.extraIncomeAllocations.some((allocation) => isActive(allocation) && allocation.incomeTransactionId === editingTransaction.id)
+                ? "Transaction updated. Review the linked extra income allocation if this amount changed."
+                : "Transaction updated."
+            );
           }}
         />
       ) : null}
@@ -602,7 +645,7 @@ export function TransactionsPage() {
             <h2>Ledger records</h2>
           </div>
         </div>
-        <div className="data-table" role="region" aria-label="Transactions">
+        <div className="data-table transaction-table" role="region" aria-label="Transactions">
           <div className="data-row header">
             <span>Date</span>
             <span>Description</span>
@@ -626,9 +669,29 @@ export function TransactionsPage() {
                 <span>{primaryLeg ? accountsById.get(primaryLeg.accountId)?.name : "Multiple"}</span>
                 <span>{splits.map((split) => categoriesById.get(split.categoryId)?.name ?? split.categoryId).join(", ") || "Transfer"}</span>
                 <Amount value={amount} />
-                <button className="icon-button" type="button" aria-label={`Archive ${transaction.description}`} onClick={() => void archiveRecord("transactions", transaction.id)}>
-                  <Archive size={16} aria-hidden="true" />
-                </button>
+                <span className="inline-actions">
+                  {isEditableTransactionType(transaction.type) ? (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      aria-label={`Edit ${transaction.description}`}
+                      onClick={() => {
+                        setSearchParams({});
+                        setEditingTransactionId(transaction.id);
+                      }}
+                    >
+                      <Pencil size={16} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={`Archive ${transaction.description}`}
+                    onClick={() => void archiveRecord("transactions", transaction.id)}
+                  >
+                    <Archive size={16} aria-hidden="true" />
+                  </button>
+                </span>
               </div>
             );
           })}
@@ -675,6 +738,42 @@ function matchingProtectedExtraIncomeAllocations(draft: TransactionDraft, snapsh
         (!allocation.protectedAccountId || allocation.protectedAccountId === draft.toAccountId)
     )
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function isEditableTransactionType(type: Transaction["type"]): type is (typeof transactionTypes)[number] {
+  return transactionTypes.includes(type as (typeof transactionTypes)[number]);
+}
+
+function transactionDraftForEdit(transaction: Transaction, snapshot: BluehourSnapshot): TransactionDraft {
+  if (!isEditableTransactionType(transaction.type)) {
+    throw new Error("This transaction type is edited through its original workflow.");
+  }
+
+  const legs = snapshot.transactionLegs.filter((legRecord) => legRecord.transactionId === transaction.id && isActive(legRecord));
+  const splits = snapshot.transactionSplits.filter((splitRecord) => splitRecord.transactionId === transaction.id && isActive(splitRecord));
+  const sourceLeg = transaction.type === "transfer" ? legs.find((legRecord) => legRecord.deltaMinor < 0) ?? legs[0] : legs[0];
+  const destinationLeg = transaction.type === "transfer" ? legs.find((legRecord) => legRecord.deltaMinor > 0) : undefined;
+  const amountMinor =
+    transaction.type === "transfer"
+      ? Math.abs(destinationLeg?.deltaMinor ?? sourceLeg?.deltaMinor ?? 0)
+      : splits.reduce((total, splitRecord) => total + splitRecord.amountMinor, 0) || Math.abs(sourceLeg?.deltaMinor ?? 0);
+  const categoryId = splits.length === 1 ? splits[0].categoryId : undefined;
+
+  return {
+    type: transaction.type,
+    occurredOn: transaction.occurredOn,
+    description: transaction.description,
+    amountMinor,
+    accountId: sourceLeg?.accountId ?? snapshot.accounts.find(isActive)?.id ?? "",
+    toAccountId: destinationLeg?.accountId,
+    categoryId,
+    splits:
+      transaction.type !== "transfer" && splits.length > 1
+        ? splits.map((splitRecord) => ({ categoryId: splitRecord.categoryId, amountMinor: splitRecord.amountMinor }))
+        : undefined,
+    note: transaction.note,
+    refundOfTransactionId: transaction.refundOfTransactionId
+  };
 }
 
 function ProtectedTransferLinkPanel({
@@ -1125,6 +1224,9 @@ function TransactionComposer({
   categories,
   transactions,
   defaultDate,
+  initialDraft,
+  heading = "New transaction",
+  saveLabel = "Save",
   onCancel,
   onSave
 }: {
@@ -1132,19 +1234,24 @@ function TransactionComposer({
   categories: Array<{ id: string; name: string; nature: string }>;
   transactions: Transaction[];
   defaultDate: string;
+  initialDraft?: TransactionDraft;
+  heading?: string;
+  saveLabel?: string;
   onCancel: () => void;
   onSave: (draft: TransactionDraft) => Promise<void>;
 }) {
-  const [type, setType] = useState<TransactionDraft["type"]>("expense");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
-  const [toAccountId, setToAccountId] = useState(accounts[1]?.id ?? accounts[0]?.id ?? "");
-  const [categoryId, setCategoryId] = useState(categories.find((category) => category.nature !== "administrative")?.id ?? categories[0]?.id ?? "");
-  const [occurredOn, setOccurredOn] = useState(defaultDate);
-  const [refundOfTransactionId, setRefundOfTransactionId] = useState("");
-  const [note, setNote] = useState("");
-  const [splits, setSplits] = useState<SplitDraft[]>([]);
+  const [type, setType] = useState<TransactionDraft["type"]>(initialDraft?.type ?? "expense");
+  const [description, setDescription] = useState(initialDraft?.description ?? "");
+  const [amount, setAmount] = useState(initialDraft ? (initialDraft.amountMinor / 100).toFixed(2) : "");
+  const [accountId, setAccountId] = useState(initialDraft?.accountId ?? accounts[0]?.id ?? "");
+  const [toAccountId, setToAccountId] = useState(initialDraft?.toAccountId ?? accounts[1]?.id ?? accounts[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(
+    initialDraft?.categoryId ?? categories.find((category) => category.nature !== "administrative")?.id ?? categories[0]?.id ?? ""
+  );
+  const [occurredOn, setOccurredOn] = useState(initialDraft?.occurredOn ?? defaultDate);
+  const [refundOfTransactionId, setRefundOfTransactionId] = useState(initialDraft?.refundOfTransactionId ?? "");
+  const [note, setNote] = useState(initialDraft?.note ?? "");
+  const [splits, setSplits] = useState<SplitDraft[]>(initialDraft?.splits ?? []);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
@@ -1177,7 +1284,7 @@ function TransactionComposer({
       <div className="band-header">
         <div>
           <p className="eyebrow">Quick entry</p>
-          <h2>New transaction</h2>
+          <h2>{heading}</h2>
         </div>
       </div>
       <form className="form-grid" onSubmit={submit}>
@@ -1309,7 +1416,7 @@ function TransactionComposer({
             Cancel
           </button>
           <button type="submit" className="primary-action">
-            Save
+            {saveLabel}
           </button>
         </div>
       </form>

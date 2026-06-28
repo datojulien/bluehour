@@ -47,6 +47,7 @@ export async function generateGeminiBudgetSetup({
     body: JSON.stringify({
       model: trimmedModel,
       input: buildGeminiBudgetSetupPrompt(payload),
+      store: false,
       response_format: {
         type: "text",
         mime_type: "application/json",
@@ -64,7 +65,7 @@ export async function generateGeminiBudgetSetup({
     throw new Error(errorBody.error?.message ?? `Gemini setup request failed with HTTP ${response.status}`);
   }
 
-  const text = extractGeminiOutputText(body as GeminiInteractionResponse);
+  const text = extractGeminiOutputText(body as GeminiInteractionResponse, "Gemini returned no setup proposal text.", "setup proposal");
   const parsed = parseJsonText(text);
   return normalizeGeminiBudgetSetupReport(parsed, payload.categories);
 }

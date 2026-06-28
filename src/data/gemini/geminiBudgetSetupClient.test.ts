@@ -33,13 +33,38 @@ describe("Gemini budget setup client", () => {
     const requestBody = JSON.parse(init?.body as string) as {
       model: string;
       input: string;
+      store: boolean;
       response_format: { mime_type: string };
       generation_config: { thinking_level: string };
     };
     expect(requestBody.model).toBe("gemini-test-pro");
     expect(requestBody.input).toContain("first salary-cycle budget setup assistant");
+    expect(requestBody.store).toBe(false);
     expect(requestBody.response_format.mime_type).toBe("application/json");
     expect(requestBody.generation_config.thinking_level).toBe("high");
+  });
+
+  it("parses setup proposal text from Interactions API model output steps", async () => {
+    const snapshot = createDemoSnapshot();
+    const payload = buildGeminiBudgetSetupPayload(snapshot, budgetInput(snapshot), demoAsOfDate);
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          status: "completed",
+          steps: [
+            {
+              type: "model_output",
+              content: [{ type: "text", text: JSON.stringify(validSetupReport()) }]
+            }
+          ]
+        }),
+        { status: 200 }
+      );
+
+    const report = await generateGeminiBudgetSetup({ apiKey: "test-key", payload, fetcher });
+
+    expect(report.reportTitle).toBe("First budget");
+    expect(report.firstCycleBudget[0].categoryId).toBe("cat-groceries");
   });
 
   it("surfaces setup API errors", async () => {

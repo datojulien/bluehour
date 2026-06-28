@@ -85,6 +85,32 @@ test.describe("production readiness scenarios", () => {
 
     await expect(page.getByText("Transaction saved locally.")).toBeVisible();
     await expect(page.getByText("Scenario manual coffee")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Scenario manual coffee" }).click();
+    const editForm = page.locator("section", { hasText: "Edit transaction" }).locator("form");
+    await editForm.getByLabel("Amount").fill("13.40");
+    await editForm.getByLabel("Date").fill("2026-07-05");
+    await editForm.getByLabel("Category").selectOption({ label: "Dining Out" });
+    await editForm.getByRole("button", { name: "Save changes" }).click();
+
+    await expect(page.getByText("Transaction updated.")).toBeVisible();
+    const editedRow = page.getByRole("region", { name: "Transactions" }).locator(".data-row", { hasText: "Scenario manual coffee" });
+    await expect(editedRow).toContainText("05/07/2026");
+    await expect(editedRow).toContainText("Dining Out");
+    await expect(editedRow).toContainText("RM13.40");
+
+    const transactions = await getStoreRecords<{ id: string; description: string }>(page, "bluehour-profile-demo", "transactions");
+    const edited = transactions.find((transaction) => transaction.description === "Scenario manual coffee");
+    expect(edited).toBeTruthy();
+    const splits = await getStoreRecords<{ transactionId: string; categoryId: string; amountMinor: number; archivedAt?: string | null }>(
+      page,
+      "bluehour-profile-demo",
+      "transactionSplits"
+    );
+    expect(splits.filter((split) => split.transactionId === edited?.id && !split.archivedAt)).toEqual([
+      expect.objectContaining({ categoryId: "cat-dining", amountMinor: 1_340 })
+    ]);
+    expect(splits.some((split) => split.transactionId === edited?.id && split.archivedAt)).toBe(true);
   });
 
   test("9. split transaction", async ({ page }) => {

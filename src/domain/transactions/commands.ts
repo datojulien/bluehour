@@ -47,6 +47,14 @@ export interface TransactionCommandResult {
   updatedRule?: CategorisationRule;
 }
 
+export interface TransactionEditCommandResult {
+  transaction: Transaction;
+  archivedLegs: TransactionLeg[];
+  archivedSplits: TransactionSplit[];
+  legs: TransactionLeg[];
+  splits: TransactionSplit[];
+}
+
 export function createTransactionRecords(draft: TransactionDraft, snapshot: BluehourSnapshot): TransactionCommandResult {
   assertIntegerMinor(draft.amountMinor);
   if (draft.amountMinor <= 0) {
@@ -98,6 +106,37 @@ export function createTransactionRecords(draft: TransactionDraft, snapshot: Blue
         }
       : undefined,
     updatedRule: ruleMatch?.updatedRule
+  };
+}
+
+export function editTransactionRecords(existing: Transaction, draft: TransactionDraft, snapshot: BluehourSnapshot): TransactionEditCommandResult {
+  assertIntegerMinor(draft.amountMinor);
+  if (draft.amountMinor <= 0) {
+    throw new Error("Transaction amount must be greater than RM0.00");
+  }
+  if (!isActive(existing)) {
+    throw new Error("Archived transactions cannot be edited");
+  }
+
+  const transaction: Transaction = {
+    ...touchRecord(existing),
+    type: draft.type,
+    occurredOn: draft.occurredOn,
+    description: draft.description.trim(),
+    merchantNormalized: normaliseDescription(draft.description),
+    note: draft.note?.trim() || undefined,
+    refundOfTransactionId: draft.refundOfTransactionId || undefined
+  };
+  const selectedCategoryId = draft.categoryId;
+  const legs = buildLegs(transaction, draft);
+  const splits = buildSplits(transaction, draft, selectedCategoryId);
+
+  return {
+    transaction,
+    archivedLegs: snapshot.transactionLegs.filter((legRecord) => isActive(legRecord) && legRecord.transactionId === existing.id).map(archiveRecord),
+    archivedSplits: snapshot.transactionSplits.filter((splitRecord) => isActive(splitRecord) && splitRecord.transactionId === existing.id).map(archiveRecord),
+    legs,
+    splits
   };
 }
 
@@ -203,5 +242,15 @@ function split(
     categoryId,
     direction,
     amountMinor
+  };
+}
+
+function archiveRecord<T extends TransactionLeg | TransactionSplit>(record: T): T {
+  const now = new Date().toISOString();
+  return {
+    ...record,
+    updatedAt: now,
+    archivedAt: now,
+    revision: record.revision + 1
   };
 }

@@ -13,6 +13,17 @@ type Fetcher = typeof fetch;
 
 export interface GeminiInteractionResponse {
   output_text?: string;
+  status?: string;
+  error?: {
+    message?: string;
+  };
+  steps?: Array<{
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
   candidates?: Array<{
     content?: {
       parts?: Array<{ text?: string }>;
@@ -56,6 +67,7 @@ export async function generateGeminiCycleReport({
     body: JSON.stringify({
       model: trimmedModel,
       input: buildGeminiCycleReportPrompt(payload),
+      store: false,
       response_format: {
         type: "text",
         mime_type: "application/json",
@@ -78,10 +90,25 @@ export async function generateGeminiCycleReport({
   return normalizeGeminiCycleReport(parsed, payload.categories);
 }
 
-export function extractGeminiOutputText(response: GeminiInteractionResponse): string {
+export function extractGeminiOutputText(response: GeminiInteractionResponse, emptyMessage = "Gemini returned no report text.", outputLabel = "report"): string {
+  if (response.status && response.status !== "completed") {
+    throw new Error(geminiStatusMessage(response, outputLabel));
+  }
+
   const direct = response.output_text?.trim();
   if (direct) {
     return direct;
+  }
+
+  const stepText = response.steps
+    ?.slice()
+    .reverse()
+    .find((step) => step.type === "model_output")
+    ?.content?.map((content) => (content.type === "text" ? content.text ?? "" : ""))
+    .join("")
+    .trim();
+  if (stepText) {
+    return stepText;
   }
 
   const candidateText = response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
@@ -89,7 +116,27 @@ export function extractGeminiOutputText(response: GeminiInteractionResponse): st
     return candidateText;
   }
 
-  throw new Error("Gemini returned no report text.");
+  throw new Error(emptyMessage);
+}
+
+function geminiStatusMessage(response: GeminiInteractionResponse, outputLabel: string): string {
+  const detail = response.error?.message ? ` ${response.error.message}` : "";
+  switch (response.status) {
+    case "in_progress":
+      return `Gemini is still generating the ${outputLabel}. Try again in a moment.`;
+    case "requires_action":
+      return `Gemini requested an unsupported follow-up action instead of returning a ${outputLabel}.`;
+    case "failed":
+      return `Gemini ${outputLabel} generation failed.${detail}`;
+    case "cancelled":
+      return `Gemini ${outputLabel} generation was cancelled.`;
+    case "incomplete":
+      return `Gemini returned an incomplete ${outputLabel}, likely because the response limit was reached.`;
+    case "budget_exceeded":
+      return `Gemini stopped before returning a ${outputLabel} because the token budget was exceeded.`;
+    default:
+      return `Gemini ${outputLabel} generation did not complete (status: ${response.status}).${detail}`;
+  }
 }
 
 function parseJsonText(text: string): unknown {
