@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Archive, FileDown, Pencil, Plus, RotateCcw, Upload } from "lucide-react";
+import { Archive, Check, FileDown, Pencil, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useBluehourData } from "../../app/providers/BluehourDataProvider";
 import { findRuleProposals, matchesRule } from "../../domain/categorisation/rules";
@@ -126,7 +126,6 @@ export function TransactionsPage() {
     .filter((allocation) => isActive(allocation) && allocation.status !== "completed")
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const editingExtraIncome = editingExtraIncomeId ? editableExtraIncomeAllocations.find((allocation) => allocation.id === editingExtraIncomeId) : undefined;
-  const editingTransaction = editingTransactionId ? allTransactions.find((transaction) => transaction.id === editingTransactionId) : undefined;
 
   async function handleImport(text: string, options: CsvImportOptions) {
     if (!snapshot) {
@@ -412,6 +411,27 @@ export function TransactionsPage() {
     setMessage(`${updatedSplitCount} split${updatedSplitCount === 1 ? "" : "s"} updated. ${reviewItems.length} conflict${reviewItems.length === 1 ? "" : "s"} saved for review.`);
   }
 
+  async function saveEditedTransaction(transaction: Transaction, draft: TransactionDraft) {
+    const result = editTransactionRecords(transaction, draft, loadedSnapshot);
+    await saveRecords(
+      [
+        { storeName: "transactions", record: result.transaction },
+        ...result.archivedLegs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+        ...result.archivedSplits.map((record) => ({ storeName: "transactionSplits" as const, record })),
+        ...result.legs.map((record) => ({ storeName: "transactionLegs" as const, record })),
+        ...result.splits.map((record) => ({ storeName: "transactionSplits" as const, record }))
+      ],
+      "transaction edit"
+    );
+    setEditingTransactionId(null);
+    setMessage(
+      transaction.type === "income" &&
+        loadedSnapshot.extraIncomeAllocations.some((allocation) => isActive(allocation) && allocation.incomeTransactionId === transaction.id)
+        ? "Transaction updated. Review the linked extra income allocation if this amount changed."
+        : "Transaction updated."
+    );
+  }
+
   return (
     <>
       <div className="page-header">
@@ -466,40 +486,6 @@ export function TransactionsPage() {
               }
             }
             setMessage("Transaction saved locally.");
-          }}
-        />
-      ) : null}
-
-      {editingTransaction ? (
-        <TransactionComposer
-          key={editingTransaction.id}
-          accounts={activeAccounts}
-          categories={activeCategories}
-          transactions={allTransactions}
-          defaultDate={asOfDate}
-          initialDraft={transactionDraftForEdit(editingTransaction, loadedSnapshot)}
-          heading="Edit transaction"
-          saveLabel="Save changes"
-          onCancel={() => setEditingTransactionId(null)}
-          onSave={async (draft) => {
-            const result = editTransactionRecords(editingTransaction, draft, loadedSnapshot);
-            await saveRecords(
-              [
-                { storeName: "transactions", record: result.transaction },
-                ...result.archivedLegs.map((record) => ({ storeName: "transactionLegs" as const, record })),
-                ...result.archivedSplits.map((record) => ({ storeName: "transactionSplits" as const, record })),
-                ...result.legs.map((record) => ({ storeName: "transactionLegs" as const, record })),
-                ...result.splits.map((record) => ({ storeName: "transactionSplits" as const, record }))
-              ],
-              "transaction edit"
-            );
-            setEditingTransactionId(null);
-            setMessage(
-              editingTransaction.type === "income" &&
-                loadedSnapshot.extraIncomeAllocations.some((allocation) => isActive(allocation) && allocation.incomeTransactionId === editingTransaction.id)
-                ? "Transaction updated. Review the linked extra income allocation if this amount changed."
-                : "Transaction updated."
-            );
           }}
         />
       ) : null}
@@ -659,6 +645,19 @@ export function TransactionsPage() {
             const splits = snapshot.transactionSplits.filter((split) => split.transactionId === transaction.id && isActive(split));
             const primaryLeg = legs[0];
             const amount = Math.abs(signedAmountForTransaction(transaction) || primaryLeg?.deltaMinor || 0);
+            if (transaction.id === editingTransactionId && isEditableTransactionType(transaction.type)) {
+              return (
+                <InlineTransactionEditRow
+                  key={transaction.id}
+                  transaction={transaction}
+                  initialDraft={transactionDraftForEdit(transaction, loadedSnapshot)}
+                  accounts={activeAccounts}
+                  categories={activeCategories}
+                  onCancel={() => setEditingTransactionId(null)}
+                  onSave={(draft) => saveEditedTransaction(transaction, draft)}
+                />
+              );
+            }
             return (
               <div className="data-row" key={transaction.id}>
                 <span>{formatDisplayDate(transaction.occurredOn)}</span>
@@ -774,6 +773,130 @@ function transactionDraftForEdit(transaction: Transaction, snapshot: BluehourSna
     note: transaction.note,
     refundOfTransactionId: transaction.refundOfTransactionId
   };
+}
+
+function InlineTransactionEditRow({
+  transaction,
+  initialDraft,
+  accounts,
+  categories,
+  onSave,
+  onCancel
+}: {
+  transaction: Transaction;
+  initialDraft: TransactionDraft;
+  accounts: Array<{ id: string; name: string }>;
+  categories: Array<{ id: string; name: string }>;
+  onSave: (draft: TransactionDraft) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [occurredOn, setOccurredOn] = useState(initialDraft.occurredOn);
+  const [description, setDescription] = useState(initialDraft.description);
+  const [accountId, setAccountId] = useState(initialDraft.accountId);
+  const [toAccountId, setToAccountId] = useState(initialDraft.toAccountId ?? accounts.find((account) => account.id !== initialDraft.accountId)?.id ?? accounts[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(initialDraft.categoryId ?? categories[0]?.id ?? "");
+  const [amount, setAmount] = useState((initialDraft.amountMinor / 100).toFixed(2));
+  const [error, setError] = useState<string | null>(null);
+  const hasMultipleSplits = Boolean(initialDraft.splits && initialDraft.splits.length > 1);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await onSave({
+        ...initialDraft,
+        occurredOn: occurredOn as TransactionDraft["occurredOn"],
+        description,
+        amountMinor: parseMoneyInput(amount),
+        accountId,
+        toAccountId: initialDraft.type === "transfer" ? toAccountId : undefined,
+        categoryId: initialDraft.type === "transfer" || hasMultipleSplits ? undefined : categoryId,
+        splits: hasMultipleSplits ? initialDraft.splits : undefined
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update transaction");
+    }
+  }
+
+  return (
+    <>
+      <form className="data-row transaction-edit-row" onSubmit={submit} aria-label={`Editing ${transaction.description}`}>
+        <span>
+          <input
+            aria-label={`Date for ${transaction.description}`}
+            type="date"
+            value={occurredOn}
+            onChange={(event) => setOccurredOn(event.target.value as TransactionDraft["occurredOn"])}
+            required
+          />
+        </span>
+        <span>
+          <input
+            aria-label={`Description for ${transaction.description}`}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            required
+          />
+          <small>{initialDraft.type.replaceAll("_", " ")}</small>
+        </span>
+        <span>
+          <select aria-label={`Account for ${transaction.description}`} value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+        </span>
+        <span>
+          {initialDraft.type === "transfer" ? (
+            <select aria-label={`To account for ${transaction.description}`} value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          ) : hasMultipleSplits ? (
+            <>
+              <strong>Multiple splits</strong>
+              <small>{initialDraft.splits?.map((split) => categories.find((category) => category.id === split.categoryId)?.name ?? split.categoryId).join(", ")}</small>
+            </>
+          ) : (
+            <select aria-label={`Category for ${transaction.description}`} value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </span>
+        <span>
+          <input
+            aria-label={`Amount for ${transaction.description}`}
+            inputMode="decimal"
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            required
+          />
+        </span>
+        <span className="inline-actions">
+          <button className="icon-button" type="submit" aria-label={`Save ${transaction.description}`}>
+            <Check size={16} aria-hidden="true" />
+          </button>
+          <button className="icon-button" type="button" aria-label={`Cancel editing ${transaction.description}`} onClick={onCancel}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </span>
+      </form>
+      {error ? (
+        <div className="data-row transaction-edit-error-row" role="alert">
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function ProtectedTransferLinkPanel({

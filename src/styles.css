@@ -477,6 +477,98 @@ h3 {
   margin-bottom: 10px;
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.cash-plan-list,
+.cash-path-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cash-plan-row,
+.cash-path-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 50px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--slate-200);
+}
+
+.cash-plan-row:last-child,
+.cash-path-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.cash-plan-row.result {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--green-soft);
+}
+
+.cash-plan-row.danger {
+  color: var(--red);
+}
+
+.cash-plan-row strong,
+.cash-path-row strong {
+  display: block;
+  color: var(--navy-950);
+  overflow-wrap: anywhere;
+}
+
+.cash-plan-row small,
+.cash-path-row small,
+.budget-row small {
+  display: block;
+  color: var(--slate-500);
+  font-size: 0.78rem;
+}
+
+.cash-plan-value,
+.cash-path-amount {
+  flex-shrink: 0;
+  color: var(--navy-950);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.cash-plan-row.danger .cash-plan-value,
+.cash-path-row.warning .cash-path-date strong,
+.cash-path-row.warning .cash-path-balance small {
+  color: var(--red);
+}
+
+.cash-path-date,
+.cash-path-balance {
+  min-width: 0;
+}
+
+.cash-path-balance {
+  display: grid;
+  justify-items: end;
+  text-align: right;
+}
+
+.cash-path-row.warning {
+  padding-left: 10px;
+  border-left: 3px solid var(--red);
+}
+
+.cash-path-row.lowest:not(.warning) {
+  padding-left: 10px;
+  border-left: 3px solid var(--amber);
+}
+
 .timeline {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
@@ -526,6 +618,7 @@ h3 {
 
 .timeline-point strong,
 .timeline-point span,
+.cash-path-row span,
 .upcoming-row strong,
 .upcoming-row span,
 .budget-row strong,
@@ -571,6 +664,26 @@ h3 {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
+}
+
+.budget-row > div:first-child > span:first-child {
+  min-width: min(100%, 11rem);
+}
+
+.budget-row > div:first-child > span:last-child {
+  text-align: right;
+}
+
+.budget-row .budget-row-meta,
+.budget-row .budget-row-meta span {
+  display: inline;
+  color: var(--slate-500);
+  font-size: 0.86rem;
+}
+
+.budget-row .budget-row-meta span {
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .upcoming-row {
@@ -1327,6 +1440,18 @@ input[type="date"] {
   min-width: 860px;
 }
 
+.transaction-table .transaction-edit-row {
+  grid-template-columns: minmax(150px, 0.9fr) minmax(210px, 1.35fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(130px, 0.75fr) minmax(96px, 0.5fr);
+  min-width: 1040px;
+}
+
+.transaction-table .transaction-edit-error-row {
+  grid-template-columns: 1fr;
+  min-width: 1040px;
+  color: var(--red);
+  font-weight: 700;
+}
+
 .subscription-table .data-row {
   grid-template-columns:
     minmax(120px, 1fr)
@@ -1900,6 +2025,7 @@ input[type="date"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .overview-grid,
   .two-column {
     grid-template-columns: 1fr;
   }
@@ -2039,6 +2165,21 @@ input[type="date"] {
 
   .timeline-point {
     min-width: 0;
+  }
+
+  .cash-plan-row,
+  .cash-path-row,
+  .budget-row > div:first-child,
+  .upcoming-row {
+    display: grid;
+    justify-items: stretch;
+    gap: 6px;
+  }
+
+  .cash-path-balance,
+  .budget-row > div:first-child > span:last-child {
+    justify-items: start;
+    text-align: left;
   }
 
   .form-grid,

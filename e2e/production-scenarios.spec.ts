@@ -87,11 +87,11 @@ test.describe("production readiness scenarios", () => {
     await expect(page.getByText("Scenario manual coffee")).toBeVisible();
 
     await page.getByRole("button", { name: "Edit Scenario manual coffee" }).click();
-    const editForm = page.locator("section", { hasText: "Edit transaction" }).locator("form");
-    await editForm.getByLabel("Amount").fill("13.40");
-    await editForm.getByLabel("Date").fill("2026-07-05");
-    await editForm.getByLabel("Category").selectOption({ label: "Dining Out" });
-    await editForm.getByRole("button", { name: "Save changes" }).click();
+    const editRow = page.locator("form.transaction-edit-row");
+    await editRow.getByLabel("Amount for Scenario manual coffee").fill("13.40");
+    await editRow.getByLabel("Date for Scenario manual coffee").fill("2026-07-05");
+    await editRow.getByLabel("Category for Scenario manual coffee").selectOption({ label: "Dining Out" });
+    await editRow.getByRole("button", { name: "Save Scenario manual coffee" }).click();
 
     await expect(page.getByText("Transaction updated.")).toBeVisible();
     const editedRow = page.getByRole("region", { name: "Transactions" }).locator(".data-row", { hasText: "Scenario manual coffee" });

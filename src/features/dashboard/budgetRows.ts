@@ -11,5 +11,5 @@ export function buildBudgetRows(snapshot: BluehourSnapshot, cycle: BudgetCycle, 
     asOfDate,
     horizonEndDate: addDays(cycle.expectedNextSalaryTo, -1),
     categoryFilter: (category) => category.nature === "discretionary" || category.nature === "essential"
-  }).slice(0, 6);
+  });
 }

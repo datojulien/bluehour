@@ -8,13 +8,13 @@ import { readSavingsCoachPreferences } from "../../domain/coach/preferences";
 import { detectSpendingLeaks } from "../../domain/coach/spendingLeakDetector";
 import { compareActiveCycleToPrevious } from "../../domain/reviews/cycleComparison";
 import { addDays, formatDisplayDate, isOnOrBefore } from "../../domain/dates";
-import type { CashFlowProjection } from "../../domain/forecasting/cashFlowProjection";
+import type { CashFlowProjection, ProjectedCashEvent, ProjectedCashFlowDay } from "../../domain/forecasting/cashFlowProjection";
 import type { SafeToSpendPeriod, SafeToSpendResult } from "../../domain/forecasting/safeToSpend";
 import { isActive, type BluehourSnapshot, type IsoDate } from "../../domain/types";
 import { Amount } from "../../ui/Amount";
 import { BreakdownDrawer } from "./BreakdownDrawer";
 import { buildBudgetRows, type DashboardBudgetRow } from "./budgetRows";
-import { buildDailyTimeline, buildDashboardModel } from "./dashboardModel";
+import { buildDashboardModel } from "./dashboardModel";
 import { buildBudgetCoachInputForCycle, readBudgetCoachPreferences } from "../budgets/budgetCoachSettings";
 
 const periodOrder: SafeToSpendPeriod[] = ["untilSalary", "thisMonth", "next30Days"];
@@ -83,9 +83,11 @@ export function OverviewPage() {
   const cashFlow = selected.cashFlow;
   const cycle = model.activeCycle;
   const budgetRows = buildBudgetRows(snapshot, cycle, asOfDate);
+  const budgetFocusRows = buildBudgetFocusRows(budgetRows);
+  const cashPlanLines = buildCashPlanLines(result);
+  const cashPath = buildCashPath(model.periods.next30Days.cashFlow);
 
   const upcoming = projected.breakdown.committedPlans.slice(0, 4);
-  const timeline = buildDailyTimeline(model.periods.next30Days.cashFlow, 30);
   const alerts = buildDashboardAlerts(snapshot, result, cashFlow, budgetRows, asOfDate);
   const comparison = compareActiveCycleToPrevious(snapshot, cycle, asOfDate);
   const whatChanged = comparison.items.slice(0, 5);
@@ -138,10 +140,15 @@ export function OverviewPage() {
       </section>
 
       <section className="metric-grid" aria-label="Safe-to-spend companion values">
-        <MetricCard icon={<Wallet size={19} />} label="Available now" value={result.safeToSpendMinor} onClick={() => setBreakdownOpen(true)} />
-        <MetricCard icon={<CalendarClock size={19} />} label="Projected" value={projected.safeToSpendMinor} onClick={() => setBreakdownOpen(true)} />
-        <MetricCard icon={<ShieldCheck size={19} />} label="Reserved essentials" value={result.committedReserveMinor + result.essentialEnvelopeReserveMinor} onClick={() => setBreakdownOpen(true)} />
-        <MetricCard icon={<TrendingDown size={19} />} label="Safety buffer" value={result.bufferReserveMinor} onClick={() => setBreakdownOpen(true)} />
+        <MetricCard icon={<Wallet size={19} />} label="Cash now" value={result.netSpendableBalanceMinor} onClick={() => setBreakdownOpen(true)} />
+        <MetricCard
+          icon={<CalendarClock size={19} />}
+          label="Bills reserved"
+          value={result.committedReserveMinor + result.essentialEnvelopeReserveMinor}
+          onClick={() => setBreakdownOpen(true)}
+        />
+        <MetricCard icon={<ShieldCheck size={19} />} label="Safety buffer" value={result.bufferReserveMinor} onClick={() => setBreakdownOpen(true)} />
+        <MetricCard icon={<TrendingDown size={19} />} label="Lowest balance" value={cashFlow.lowestProjectedBalanceMinor} onClick={() => setBreakdownOpen(true)} />
       </section>
 
       {result.shortfallMinor > 0 ? (
@@ -189,24 +196,51 @@ export function OverviewPage() {
         </section>
       ) : null}
 
-      <section className="dashboard-band">
-        <div className="band-header">
-          <div>
-            <p className="eyebrow">Thirty-day timeline</p>
-            <h2>Planned cash movement</h2>
+      <section className="overview-grid">
+        <div className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Cash answer</p>
+              <h2>Why this number</h2>
+            </div>
+            <button className="secondary-action" type="button" onClick={() => setBreakdownOpen(true)}>
+              Breakdown
+            </button>
+          </div>
+          <div className="cash-plan-list">
+            {cashPlanLines.map((line) => (
+              <div className={`cash-plan-row${line.level ? ` ${line.level}` : ""}`} key={line.id}>
+                <span>
+                  <strong>{line.label}</strong>
+                  <small>{line.detail}</small>
+                </span>
+                <Amount value={line.valueMinor} className="cash-plan-value" />
+              </div>
+            ))}
           </div>
         </div>
-        <div className="timeline">
-          {timeline.map((point) => (
-            <div className={`timeline-point${point.isLowest ? " timeline-lowest" : ""}${point.isBelowBuffer ? " timeline-warning" : ""}`} key={point.date}>
-              <span className="timeline-dot" aria-hidden="true" />
-              <div>
-                <strong>{point.labels.length > 0 ? point.labels.join(", ") : "Projected day"}</strong>
-                <span>{formatDisplayDate(point.date)}</span>
-              </div>
-              <Amount value={point.balanceMinor} />
+
+        <div className="dashboard-band">
+          <div className="band-header">
+            <div>
+              <p className="eyebrow">Next 30 days</p>
+              <h2>Cash path</h2>
             </div>
-          ))}
+          </div>
+          <div className="cash-path-list">
+            {cashPath.map((point) => (
+              <div className={`cash-path-row${point.isLowest ? " lowest" : ""}${point.isBelowBuffer ? " warning" : ""}`} key={point.date}>
+                <span className="cash-path-date">
+                  <strong>{formatDisplayDate(point.date)}</strong>
+                  <small>{point.labels.join(" · ")}</small>
+                </span>
+                <span className="cash-path-balance">
+                  <Amount value={point.balanceMinor} className="cash-path-amount" />
+                  {point.isLowest ? <small>lowest</small> : point.isBelowBuffer ? <small>below buffer</small> : null}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -215,32 +249,46 @@ export function OverviewPage() {
           <div className="band-header">
             <div>
               <p className="eyebrow">Budgets</p>
-              <h2>Cycle progress</h2>
+              <h2>Budget focus</h2>
             </div>
+            <a className="secondary-action" href="#/budgets">
+              Open Budgets
+            </a>
           </div>
           <div className="budget-list">
-            {budgetRows.map((row) => (
-              <div className="budget-row" key={row.categoryId}>
-                <div>
-                  <strong>{row.categoryName}</strong>
-                  <span>
-                    Allocated <Amount value={row.allocationMinor} /> · Spent <Amount value={row.spentMinor} /> · Reserved{" "}
-                    <Amount value={row.reservedFuturePlansMinor} /> · Remaining <Amount value={row.remainingAfterFuturePlansMinor} />
-                  </span>
-                  <small>{stateLabel(row.state)}</small>
+            {budgetFocusRows.length > 0 ? (
+              budgetFocusRows.map((row) => (
+                <div className="budget-row" key={row.categoryId}>
+                  <div>
+                    <span>
+                      <strong>{row.categoryName}</strong>
+                      <small>{stateLabel(row.state)}</small>
+                    </span>
+                    <span className="budget-row-meta">
+                      Allocated <Amount value={row.allocationMinor} /> · Spent <Amount value={row.spentMinor} /> · Reserved{" "}
+                      <Amount value={row.reservedFuturePlansMinor} /> · Remaining <Amount value={row.remainingAfterFuturePlansMinor} />
+                    </span>
+                  </div>
+                  <div
+                    className="progress-track"
+                    role="progressbar"
+                    aria-label={`${row.categoryName} ${row.percentageUsedOrReserved}% used or reserved`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.min(100, row.percentageUsedOrReserved)}
+                  >
+                    <span style={{ width: `${Math.min(100, row.percentageUsedOrReserved)}%` }} />
+                  </div>
                 </div>
-                <div
-                  className="progress-track"
-                  role="progressbar"
-                  aria-label={`${row.categoryName} ${row.percentageUsedOrReserved}% used or reserved`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.min(100, row.percentageUsedOrReserved)}
-                >
-                  <span style={{ width: `${Math.min(100, row.percentageUsedOrReserved)}%` }} />
-                </div>
+              ))
+            ) : (
+              <div className="stack-row">
+                <span>
+                  <strong>No active budget pressure</strong>
+                  <small>No category has spend, reserves, or allocation in this cycle.</small>
+                </span>
               </div>
-            ))}
+            )}
           </div>
         </div>
 
@@ -252,15 +300,24 @@ export function OverviewPage() {
             </div>
           </div>
           <div className="upcoming-list">
-            {upcoming.map((plan) => (
-              <div className="upcoming-row" key={plan.id}>
-                <div>
-                  <strong>{plan.label}</strong>
-                  <span>{plan.date ? formatDisplayDate(plan.date) : ""}</span>
+            {upcoming.length > 0 ? (
+              upcoming.map((plan) => (
+                <div className="upcoming-row" key={plan.id}>
+                  <div>
+                    <strong>{plan.label}</strong>
+                    <span>{plan.date ? formatDisplayDate(plan.date) : ""}</span>
+                  </div>
+                  <Amount value={plan.amountMinor} />
                 </div>
-                <Amount value={plan.amountMinor} />
+              ))
+            ) : (
+              <div className="stack-row">
+                <span>
+                  <strong>No scheduled payments</strong>
+                  <small>No committed payments are reserved in this period.</small>
+                </span>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
@@ -345,6 +402,208 @@ export function OverviewPage() {
 
 function PiggyBankIcon() {
   return <PiggyBank size={18} aria-hidden="true" />;
+}
+
+interface CashPlanLine {
+  id: string;
+  label: string;
+  detail: string;
+  valueMinor: number;
+  level?: "result" | "danger";
+}
+
+interface CashPathPoint {
+  date: IsoDate;
+  balanceMinor: number;
+  labels: string[];
+  isLowest: boolean;
+  isBelowBuffer: boolean;
+}
+
+function buildCashPlanLines(result: SafeToSpendResult): CashPlanLine[] {
+  const lines: CashPlanLine[] = [
+    {
+      id: "cash-now",
+      label: "Cash now",
+      detail: "Spendable balance before future income",
+      valueMinor: result.netSpendableBalanceMinor
+    }
+  ];
+
+  if (result.countedFutureIncomeMinor > 0) {
+    lines.push({
+      id: "future-income",
+      label: "Confirmed income",
+      detail: "Income counted in this view",
+      valueMinor: result.countedFutureIncomeMinor
+    });
+  }
+
+  lines.push(
+    {
+      id: "bills-essentials",
+      label: "Bills and essentials",
+      detail: "Committed payments plus envelope reserves",
+      valueMinor: result.committedReserveMinor + result.essentialEnvelopeReserveMinor
+    },
+    {
+      id: "protected",
+      label: "Protected savings",
+      detail: "Cycle contribution still held aside",
+      valueMinor: result.protectedReserveMinor
+    },
+    {
+      id: "buffer",
+      label: "Safety buffer",
+      detail: "Minimum cash kept untouched",
+      valueMinor: result.bufferReserveMinor
+    },
+    {
+      id: "budget-room",
+      label: "Budget room",
+      detail: "Discretionary budget after spent and planned items",
+      valueMinor: result.discretionaryRemainderMinor,
+      level: result.discretionaryRemainderMinor < 0 ? "danger" : undefined
+    },
+    result.shortfallMinor > 0
+      ? {
+          id: "shortfall",
+          label: "Forecast shortfall",
+          detail: "Gap before discretionary spending",
+          valueMinor: result.shortfallMinor,
+          level: "danger"
+        }
+      : {
+          id: "safe",
+          label: "Safe to spend",
+          detail: `${result.remainingDays} day${result.remainingDays === 1 ? "" : "s"} in this view`,
+          valueMinor: result.safeToSpendMinor,
+          level: "result"
+        }
+  );
+
+  return lines;
+}
+
+function buildCashPath(projection: CashFlowProjection, maxPoints = 7): CashPathPoint[] {
+  const candidates = projection.days.filter(
+    (day) =>
+      day.date === projection.asOfDate ||
+      day.date === projection.horizonEndDate ||
+      day.date === projection.firstBelowBufferDate ||
+      day.isLowest ||
+      hasVisibleCashEvent(day)
+  );
+  const ranked = [...(candidates.length > 0 ? candidates : projection.days.slice(0, 1))]
+    .sort((left, right) => cashPathScore(right, projection) - cashPathScore(left, projection) || left.date.localeCompare(right.date))
+    .slice(0, maxPoints)
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  return ranked.map((day) => ({
+    date: day.date,
+    balanceMinor: day.balanceMinor,
+    labels: cashPathLabels(day),
+    isLowest: day.isLowest,
+    isBelowBuffer: day.isBelowBuffer
+  }));
+}
+
+function cashPathScore(day: ProjectedCashFlowDay, projection: CashFlowProjection): number {
+  let score = 0;
+  if (day.date === projection.asOfDate) {
+    score += 1000;
+  }
+  if (day.events.some((event) => event.kind === "income")) {
+    score += 900;
+  }
+  if (day.isLowest) {
+    score += 800;
+  }
+  if (day.date === projection.firstBelowBufferDate) {
+    score += 700;
+  }
+  if (day.events.some((event) => event.kind === "committed_expense" || event.kind === "essential_plan" || event.kind === "protected_transfer")) {
+    score += 500;
+  }
+  if (day.events.some((event) => event.kind === "discretionary_plan")) {
+    score += 300;
+  }
+  if (day.events.some((event) => event.kind === "internal_transfer")) {
+    score += 200;
+  }
+  if (day.date === projection.horizonEndDate) {
+    score += 100;
+  }
+  return score;
+}
+
+function hasVisibleCashEvent(day: ProjectedCashFlowDay): boolean {
+  return day.events.some((event) => event.kind !== "essential_distribution");
+}
+
+function cashPathLabels(day: ProjectedCashFlowDay): string[] {
+  const visibleEvents = day.events.filter((event) => event.kind !== "essential_distribution");
+  const labels = visibleEvents.slice(0, 2).map(cashEventLabel);
+  const hiddenEvents = Math.max(0, visibleEvents.length - labels.length);
+  const reserveCategoryCount = new Set(day.events.filter((event) => event.kind === "essential_distribution").map((event) => event.categoryId ?? event.label)).size;
+
+  if (reserveCategoryCount > 0 && labels.length < 2) {
+    labels.push(reserveCategoryCount === 1 ? "Essential reserve" : `${reserveCategoryCount} essential reserves`);
+  }
+
+  if (hiddenEvents > 0) {
+    labels.push(`+${hiddenEvents} more`);
+  }
+
+  if (day.isLowest) {
+    labels.push("Lowest projected balance");
+  } else if (day.isBelowBuffer) {
+    labels.push("Below safety buffer");
+  }
+
+  if (labels.length === 0) {
+    return ["Projected balance"];
+  }
+
+  if (labels.length <= 3) {
+    return labels;
+  }
+
+  return [labels[0], labels[1], `+${labels.length - 2} more`];
+}
+
+function cashEventLabel(event: ProjectedCashEvent): string {
+  if (!event.isAssumption || /\bassumed\b/i.test(event.label)) {
+    return event.label;
+  }
+  return `${event.label} (assumed)`;
+}
+
+const budgetStateRank: Record<DashboardBudgetRow["state"], number> = {
+  overspent: 0,
+  near_limit: 1,
+  fully_reserved: 2,
+  no_allocation: 3,
+  on_track: 4
+};
+
+function buildBudgetFocusRows(rows: readonly DashboardBudgetRow[], maxRows = 4): DashboardBudgetRow[] {
+  return [...rows]
+    .filter(
+      (row) =>
+        row.allocationMinor > 0 ||
+        row.spentMinor > 0 ||
+        row.reservedFuturePlansMinor > 0 ||
+        row.remainingAfterFuturePlansMinor < 0
+    )
+    .sort(
+      (left, right) =>
+        budgetStateRank[left.state] - budgetStateRank[right.state] ||
+        right.percentageUsedOrReserved - left.percentageUsedOrReserved ||
+        left.remainingAfterFuturePlansMinor - right.remainingAfterFuturePlansMinor ||
+        left.categoryName.localeCompare(right.categoryName)
+    )
+    .slice(0, maxRows);
 }
 
 function buildDashboardAlerts(
